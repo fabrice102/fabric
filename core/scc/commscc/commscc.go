@@ -82,7 +82,7 @@ func (scc *CommSCC) send(stub shim.ChaincodeStubInterface) pb.Response {
 	// SessionID
 	sessionID := args[2]
 	// Unmarshal the endpoint
-	endpoint := string(args[4])
+	endpoint := string(args[3])
 
 	// TODO: replace this with one with SendByCriteria to receive an ack
 	service.GetGossipService().Send(
