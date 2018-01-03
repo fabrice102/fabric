@@ -43,9 +43,9 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 	decorations := stub.GetDecorations()
 
 	//function := string(args[0])
-	masterStr := string(decorations["target"])
+	masterStr := string(decorations["master"])
 	master := true
-	if masterStr == "false" {
+	if masterStr == "0" {
 		master = false
 	}
 	target := string(decorations["target"])
@@ -63,29 +63,41 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 	//// Open channel
 	channel := mpc.NewCommSCCChannel(stub)
 	if master {
+		fmt.Println("master 1")
 		// First send, then receive
 		err := channel.Send(input, target)
+		fmt.Println("master 2")
 		if err != nil {
+			fmt.Println("master 3")
 			return shim.Error(err.Error())
 		}
 
+		fmt.Println("master 4")
 		res, err := channel.Receive(10)
 		if err != nil {
+			fmt.Println("master 5")
 			return shim.Error(err.Error())
 		}
+		fmt.Println("master 6")
 		fmt.Printf("got [%v] from [%s]", res, target)
 	} else {
 		// First receive, then send
+		fmt.Println("slave 1")
 		res, err := channel.Receive(10)
+		fmt.Println("slave 2")
 		if err != nil {
+			fmt.Println("slave 3")
 			return shim.Error(err.Error())
 		}
+		fmt.Println("slave 4")
 		fmt.Printf("got [%v] from [%s]", res, target)
 
 		err = channel.Send(input, target)
 		if err != nil {
+			fmt.Println("slave 5")
 			return shim.Error(err.Error())
 		}
+		fmt.Println("slave 6")
 	}
 
 	return shim.Success(nil)

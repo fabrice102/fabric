@@ -46,6 +46,9 @@ func (scc *CommSCC) Init(stub shim.ChaincodeStubInterface) pb.Response {
 	scc.actions[SEND] = scc.send
 	scc.actions[RECEIVE] = scc.receive
 
+	// SHAI: Do we really need this? Otherwise scc.PubSub.Subscribe in commscc.go crashes when trying to lock at line 
+	scc.PubSub = util.NewPubSub()
+
 	// Start listening to MPC messages.
 	// This needs to be called once and for all.
 	_, rmc := service.GetGossipService().Accept(scc.mpcMessageAcceptor, true)
