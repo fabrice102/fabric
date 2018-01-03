@@ -19,9 +19,11 @@ package main
 import (
 	"fmt"
 
-	"github.com/hyperledger/fabric/core/chaincode/shim"
-	pb "github.com/hyperledger/fabric/protos/peer"
 	"strconv"
+
+	"github.com/hyperledger/fabric/core/chaincode/shim"
+	"github.com/hyperledger/fabric/mpc"
+	pb "github.com/hyperledger/fabric/protos/peer"
 )
 
 type MPCExampleChaincode struct {
@@ -42,15 +44,14 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 
 	//function := string(args[0])
 	masterStr := string(decorations["target"])
-	//master := true
-	//if masterStr == "false" {
-	//	master = false
-	//}
+	master := true
+	if masterStr == "false" {
+		master = false
+	}
 	target := string(decorations["target"])
 	input := decorations["input"]
 
 	fmt.Printf("Decorations: [%s][%s][%s]\n", masterStr, target, string(input))
-
 
 	fmt.Println("ex02 Invoke")
 	function, args := stub.GetFunctionAndParameters()
@@ -60,32 +61,32 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 	}
 
 	//// Open channel
-	//channel := NewCommSCCChannel(stub)
-	//if master {
-	//	// First send, then receive
-	//	err := channel.Send(input, target)
-	//	if err != nil {
-	//		return shim.Error(err.Error())
-	//	}
-	//
-	//	res, err := channel.Receive(10)
-	//	if err != nil {
-	//		return shim.Error(err.Error())
-	//	}
-	//	fmt.Printf("got [%v] from [%s]", res, target)
-	//} else {
-	//	// First receive, then send
-	//	res, err := channel.Receive(10)
-	//	if err != nil {
-	//		return shim.Error(err.Error())
-	//	}
-	//	fmt.Printf("got [%v] from [%s]", res, target)
-	//
-	//	err = channel.Send(input, target)
-	//	if err != nil {
-	//		return shim.Error(err.Error())
-	//	}
-	//}
+	channel := mpc.NewCommSCCChannel(stub)
+	if master {
+		// First send, then receive
+		err := channel.Send(input, target)
+		if err != nil {
+			return shim.Error(err.Error())
+		}
+
+		res, err := channel.Receive(10)
+		if err != nil {
+			return shim.Error(err.Error())
+		}
+		fmt.Printf("got [%v] from [%s]", res, target)
+	} else {
+		// First receive, then send
+		res, err := channel.Receive(10)
+		if err != nil {
+			return shim.Error(err.Error())
+		}
+		fmt.Printf("got [%v] from [%s]", res, target)
+
+		err = channel.Send(input, target)
+		if err != nil {
+			return shim.Error(err.Error())
+		}
+	}
 
 	return shim.Success(nil)
 }
@@ -96,7 +97,6 @@ func (t *MPCExampleChaincode) query(stub shim.ChaincodeStubInterface, args []str
 	fmt.Printf("Query Response:%s\n", jsonResp)
 	return shim.Success([]byte(strconv.Itoa(100)))
 }
-
 
 func main() {
 	err := shim.Start(new(MPCExampleChaincode))
