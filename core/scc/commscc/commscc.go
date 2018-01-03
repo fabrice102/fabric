@@ -40,6 +40,8 @@ type CommSCC struct {
 func (scc *CommSCC) Init(stub shim.ChaincodeStubInterface) pb.Response {
 	defer logger.Infof("Successfully initialized CommSCC.")
 
+	scc.actions = map[string]action{}
+
 	// Define the functions the chaincode handles
 	scc.actions[SEND] = scc.send
 	scc.actions[RECEIVE] = scc.receive
