@@ -236,11 +236,11 @@ updateAnchorPeers 2
 ## Install chaincode on Peer0/Org1 and Peer2/Org2
 echo "Installing chaincode on org1/peer0..."
 installChaincode 0
-echo "Install chaincode on org2/peer2..."
+echo "Install chaincode on org1/peer1..."
 installChaincode 1
 
 #Instantiate chaincode on Peer2/Org2
-echo "Instantiating chaincode on org2/peer2..."
+echo "Instantiating chaincode on org1/peer0..."
 instantiateChaincode 0
 
 #Query on chaincode on Peer0/Org1

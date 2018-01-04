@@ -1,3 +1,3 @@
-master: true
-target: peer1.org2.example.com
-input: 15
+master: "true"
+target: peer1.org2.example.com:7051
+input: 3

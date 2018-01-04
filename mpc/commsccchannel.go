@@ -4,9 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
-	"github.com/hyperledger/fabric/protos/gossip"
 )
 
 const (
@@ -24,13 +22,16 @@ type commSCCChannel struct {
 // and using txID as sessionID
 func NewCommSCCChannel(stub shim.ChaincodeStubInterface) Channel {
 	sessionID := []byte(stub.GetTxID())
+	fmt.Printf("Session ID: [%v]\n", string(sessionID))
 	return &commSCCChannel{stub: stub, sessionID: sessionID}
 }
 
 func (c *commSCCChannel) Send(payload []byte, endpoint string) error {
+	fmt.Printf("[%v] Send [%v] to [%v]\n",  string(c.sessionID), string(payload), endpoint)
+
 	r := c.stub.InvokeChaincode(
 		COMM_SCC,
-		[][]byte{[]byte(SEND), c.sessionID, payload, []byte(endpoint)},
+		[][]byte{[]byte(SEND), payload, c.sessionID, []byte(endpoint)},
 		"",
 	)
 
@@ -42,6 +43,8 @@ func (c *commSCCChannel) Send(payload []byte, endpoint string) error {
 }
 
 func (c *commSCCChannel) Receive(timeout int) ([]byte, error) {
+	fmt.Printf("[%v] Receive with timeout [%v]\n",  string(c.sessionID), timeout)
+
 	r := c.stub.InvokeChaincode(
 		COMM_SCC,
 		[][]byte{[]byte(RECEIVE), c.sessionID},
@@ -49,18 +52,12 @@ func (c *commSCCChannel) Receive(timeout int) ([]byte, error) {
 	)
 
 	if r.Status != shim.OK {
-		return nil, fmt.Errorf("failed receiving message [%s]", r.String())
+		return nil, fmt.Errorf("failed receiving message [%s][%s]", r.String(), r.Payload)
 	}
 
-	mpcDataMsg := &gossip.MPCDataMessage{}
-	err := proto.Unmarshal(r.Payload, mpcDataMsg)
-	if err != nil {
-		return nil, fmt.Errorf("failed unmarshalling mpc data message on receive [%s]", err)
+	if r.Payload == nil {
+		return nil, errors.New("failed receiving message [payload is nil]")
 	}
 
-	if mpcDataMsg.Payload == nil {
-		return nil, errors.New("failed unmarshalling mpc data message on receive [payload is nil]")
-	}
-
-	return mpcDataMsg.Payload.Data, nil
+	return r.Payload, nil
 }

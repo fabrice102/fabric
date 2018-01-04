@@ -24,6 +24,7 @@ import (
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/mpc"
 	pb "github.com/hyperledger/fabric/protos/peer"
+	"time"
 )
 
 type MPCExampleChaincode struct {
@@ -42,6 +43,10 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 	// decorations["input"]
 	decorations := stub.GetDecorations()
 
+	for key, value := range decorations {
+		fmt.Printf("Decorations: [%v][%v]\n", key, value)
+	}
+
 	//function := string(args[0])
 	masterStr := string(decorations["master"])
 	master := true
@@ -51,7 +56,7 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 	target := string(decorations["target"])
 	input := decorations["input"]
 
-	fmt.Printf("Decorations: [%s][%s][%s]\n", master, target, string(input))
+	fmt.Printf("Decorations: [%s][%v][%s][%s]\n", masterStr, master, target, string(input))
 
 	fmt.Println("ex02 Invoke")
 	function, args := stub.GetFunctionAndParameters()
@@ -64,18 +69,21 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 	channel := mpc.NewCommSCCChannel(stub)
 	if master {
 		fmt.Println("master 1")
+
+		fmt.Println("wait a bit")
+		time.Sleep(time.Second * 30)
+		fmt.Println("send")
 		// First send, then receive
 		err := channel.Send(input, target)
-		fmt.Println("master 2")
+		fmt.Printf("master 2, err [%s]\n", err)
 		if err != nil {
-			fmt.Println("master 3")
+			fmt.Printf("master 3, err [%s]", err)
 			return shim.Error(err.Error())
 		}
-
-		fmt.Println("master 4")
+		fmt.Printf("master 4, err [%s]\n", err)
 		res, err := channel.Receive(10)
 		if err != nil {
-			fmt.Println("master 5")
+			fmt.Printf("master 5, err [%s]", err)
 			return shim.Error(err.Error())
 		}
 		fmt.Println("master 6")
@@ -84,9 +92,9 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 		// First receive, then send
 		fmt.Println("slave 1")
 		res, err := channel.Receive(10)
-		fmt.Println("slave 2")
+		fmt.Printf("slave 2, err [%v]\n", err)
 		if err != nil {
-			fmt.Println("slave 3")
+			fmt.Printf("slave 3, err [%s]", err)
 			return shim.Error(err.Error())
 		}
 		fmt.Println("slave 4")
@@ -94,7 +102,7 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 
 		err = channel.Send(input, target)
 		if err != nil {
-			fmt.Println("slave 5")
+			fmt.Printf("slave 5, err [%s]", err)
 			return shim.Error(err.Error())
 		}
 		fmt.Println("slave 6")

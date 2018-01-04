@@ -155,15 +155,13 @@ services:
         - ./crypto-config:/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/
         - ./scripts:/opt/gopath/src/github.com/hyperledger/fabric/peer/scripts/
         - ./channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
-#        - /Users/adc/golang/src/github.com/golang/protobuf/:/opt/gopath/src/github.com/golang/protobuf/
-#        - /Users/adc/golang/src/github.com/golang/protobuf/proto/:/opt/gopath/src/github.com/golang/protobuf/proto/
-#        - /Users/adc/golang/src/github.com/hyperledger/fabric/protos/gossip/:/opt/gopath/src/github.com/hyperledger/fabric/protos/gossip/
-#        - /Users/adc/golang/src/github.com/hyperledger/fabric/gossip/:/opt/gopath/src/github.com/hyperledger/fabric/gossip/
-#        - /Users/adc/golang/src/github.com/hyperlgedger/fabric/:/chaincode/input/src/github.com/hyperledger/fabric/
-#        - /Users/adc/golang/src/github.com/pkg/errors:/opt/gopath/src/github.com/pkg/errors
-#        - /Users/adc/golang/src/golang.org/x/net/context:/opt/gopath/src/golang.org/x/net/context
-#        - /Users/adc/golang/src/google.golang.org/:/opt/gopath/src/google.golang.org/
-#        - /Users/adc/golang/src/golang.org/:/opt/gopath/src/golang.org/
+        - ../../mpc:/opt/gopath/src/github.com/hyperledger/fabric/mpc
+        - ../../protos/gossip:/opt/gopath/src/github.com/hyperledger/fabric/protos/gossip
+        - ../../gossip:/opt/gopath/src/github.com/hyperledger/fabric/gossip/
+        - ../../vendor/github.com/golang/protobuf/:/opt/gopath/src/github.com/golang/protobuf/
+        - ../../vendor/github.com/pkg/errors:/opt/gopath/src/github.com/pkg/errors
+        - ../../vendor/golang.org/x/:/opt/gopath/src/golang.org/x/
+        - ../../vendor/google.golang.org/:/opt/gopath/src/google.golang.org/
     depends_on:
       - orderer.example.com
       - peer0.org1.example.com

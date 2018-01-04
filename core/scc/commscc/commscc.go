@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/gossip/comm"
@@ -30,7 +29,7 @@ const (
 type action func(stub shim.ChaincodeStubInterface) pb.Response
 
 type CommSCC struct {
-	*util.PubSub
+	pubSub *util.PubSub
 
 	actions map[string]action
 
@@ -46,19 +45,26 @@ func (scc *CommSCC) Init(stub shim.ChaincodeStubInterface) pb.Response {
 	scc.actions[SEND] = scc.send
 	scc.actions[RECEIVE] = scc.receive
 
-	// SHAI: Do we really need this? Otherwise scc.PubSub.Subscribe in commscc.go crashes when trying to lock at line 
-	scc.PubSub = util.NewPubSub()
+	// SHAI: Do we really need this? Otherwise scc.PubSub.Subscribe in commscc.go crashes when trying to lock at line
+	scc.pubSub = util.NewPubSub()
 
 	// Start listening to MPC messages.
 	// This needs to be called once and for all.
 	_, rmc := service.GetGossipService().Accept(scc.mpcMessageAcceptor, true)
 	go func() {
 		// TODO: do we need a way to exit the loop?
+		logger.Infof("Listen to RMC queue...")
 		for msg := range rmc {
+			logger.Infof("Publish [%v] to [%v]", msg, string(msg.GetGossipMessage().GetMpcData().Payload.SessionID))
+
 			// Publish the message using as topic the session ID.
 			// Session ID can be chosen arbitrarily. One way to choose it
 			// is by setting it to the transaction ID.
-			scc.Publish(string(msg.GetGossipMessage().GetMpcData().Payload.SessionID), msg)
+			err := scc.pubSub.Publish(string(msg.GetGossipMessage().GetMpcData().Payload.SessionID), msg)
+			if err != nil {
+				// TODO: cache the message and give it a chance to reappear later
+				logger.Errorf("Failed publishing [%v] to [%v]. Err [%s]", msg, string(msg.GetGossipMessage().GetMpcData().Payload.SessionID), err)
+			}
 		}
 	}()
 
@@ -87,6 +93,8 @@ func (scc *CommSCC) send(stub shim.ChaincodeStubInterface) pb.Response {
 	// Unmarshal the endpoint
 	endpoint := string(args[3])
 
+	logger.Infof("[%v] Send [%v] to [%v]", string(sessionID), string(payload), endpoint)
+
 	// TODO: replace this with one with SendByCriteria to receive an ack
 	service.GetGossipService().Send(
 		&gossip.GossipMessage{
@@ -112,27 +120,29 @@ func (scc *CommSCC) receive(stub shim.ChaincodeStubInterface) pb.Response {
 	// Topic
 	topic := string(args[1])
 
+	logger.Infof("Receive on [%v]", topic)
+
 	// Wait for the message on the given topic for a given amount of time
 	// TODO: allow the invoker to specify the timeout
-	sub := scc.PubSub.Subscribe(topic, time.Second*10)
+	sub := scc.pubSub.Subscribe(topic, time.Second*240)
 	msg, err := sub.Listen()
 	if err != nil {
-		return shim.Error(fmt.Sprintf("failed receive [%s]", err))
+		logger.Errorf("[%v] failed receive [%s]", topic, err)
+		return shim.Error(fmt.Sprintf("[%v] failed receive [%s]", topic, err))
 	}
 
 	// Given init, we expect to see a ReceivedMessage here.
 	mpcData := msg.(gossip.ReceivedMessage).GetGossipMessage().GetMpcData()
 	if mpcData == nil {
-		return shim.Error("received empty mpc message.")
+		logger.Errorf("[%v] received empty mpc message.", topic)
+		return shim.Error(fmt.Sprintf("[%s] received empty mpc message.", topic))
 	}
 
-	// Marshall MPC Data
-	raw, err := proto.Marshal(mpcData)
-	if err != nil {
-		return shim.Error(fmt.Sprintf("failed marshalling receive mpc message [%s]", err))
-	}
+	logger.Infof("Received on [%v], [%v]", topic, mpcData.Payload.Data)
 
-	return shim.Success(raw)
+	// TODO: check that payload is different from nil
+
+	return shim.Success(mpcData.Payload.Data)
 }
 
 func (scc *CommSCC) mpcMessageAcceptor(input interface{}) bool {
@@ -142,6 +152,10 @@ func (scc *CommSCC) mpcMessageAcceptor(input interface{}) bool {
 	if !ok {
 		// Not a ReceivedMessage
 		return false
+	}
+
+	if msg.GetGossipMessage().IsMpcData() {
+		logger.Infof("Intercepted [%v], [%v], [%v]", msg, ok, msg.GetGossipMessage().IsMpcData())
 	}
 
 	// Is this message an MPC message?
