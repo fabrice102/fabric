@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hyperledger/fabric/build/docker/gotools/obj/gopath/src/github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/gossip/comm"
@@ -40,9 +40,14 @@ type CommSCC struct {
 func (scc *CommSCC) Init(stub shim.ChaincodeStubInterface) pb.Response {
 	defer logger.Infof("Successfully initialized CommSCC.")
 
+	scc.actions = map[string]action{}
+
 	// Define the functions the chaincode handles
 	scc.actions[SEND] = scc.send
 	scc.actions[RECEIVE] = scc.receive
+
+	// SHAI: Do we really need this? Otherwise scc.PubSub.Subscribe in commscc.go crashes when trying to lock at line 
+	scc.PubSub = util.NewPubSub()
 
 	// Start listening to MPC messages.
 	// This needs to be called once and for all.
@@ -80,7 +85,7 @@ func (scc *CommSCC) send(stub shim.ChaincodeStubInterface) pb.Response {
 	// SessionID
 	sessionID := args[2]
 	// Unmarshal the endpoint
-	endpoint := string(args[4])
+	endpoint := string(args[3])
 
 	// TODO: replace this with one with SendByCriteria to receive an ack
 	service.GetGossipService().Send(

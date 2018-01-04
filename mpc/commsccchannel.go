@@ -1,8 +1,8 @@
 package mpc
 
 import (
-	"fmt"
 	"errors"
+	"fmt"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
@@ -11,8 +11,8 @@ import (
 
 const (
 	COMM_SCC = "commscc"
-	SEND    = "send"
-	RECEIVE = "receive"
+	SEND     = "send"
+	RECEIVE  = "receive"
 )
 
 type commSCCChannel struct {
