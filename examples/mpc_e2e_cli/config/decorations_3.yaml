@@ -1,3 +1,3 @@
-master: false
-target: peer0.org1.example.com
+master: true
+target: peer1.org2.example.com
 input: 15

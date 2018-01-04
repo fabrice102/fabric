@@ -67,8 +67,8 @@ services:
         - /var/run/:/host/var/run/
         - ../crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp:/etc/hyperledger/fabric/msp
         - ../crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls:/etc/hyperledger/fabric/tls
-        - ../config/decorations_1.yaml:/opt/gopath/src/github.com/hyperledger/fabric/sampleconfig/decoration.yaml
-        - ../config/core.yaml:/opt/gopath/src/github.com/hyperledger/fabric/sampleconfig/core.yaml
+        - ../config/decorations_1.yaml:/etc/hyperledger/fabric/decoration.yaml
+        - ../config/core.yaml:/etc/hyperledger/fabric/core.yaml
     ports:
       - 7051:7051
       - 7052:7052
@@ -91,8 +91,8 @@ services:
         - /var/run/:/host/var/run/
         - ../crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/msp:/etc/hyperledger/fabric/msp
         - ../crypto-config/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls:/etc/hyperledger/fabric/tls
-        - ../config/decorations_2.yaml:/opt/gopath/src/github.com/hyperledger/fabric/sampleconfig/decoration.yaml
-        - ../config/core.yaml:/opt/gopath/src/github.com/hyperledger/fabric/sampleconfig/core.yaml
+        - ../config/decorations_2.yaml:/etc/hyperledger/fabric/decoration.yaml
+        - ../config/core.yaml:/etc/hyperledger/fabric/core.yaml
     ports:
       - 8051:7051
       - 8052:7052
@@ -114,8 +114,8 @@ services:
         - /var/run/:/host/var/run/
         - ../crypto-config/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/msp:/etc/hyperledger/fabric/msp
         - ../crypto-config/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls:/etc/hyperledger/fabric/tls
-        - ../config/decorations_3.yaml:/opt/gopath/src/github.com/hyperledger/fabric/sampleconfig/decoration.yaml
-        - ../config/core.yaml:/opt/gopath/src/github.com/hyperledger/fabric/sampleconfig/core.yaml
+        - ../config/decorations_3.yaml:/etc/hyperledger/fabric/decoration.yaml
+        - ../config/core.yaml:/etc/hyperledger/fabric/core.yaml
     ports:
       - 9051:7051
       - 9052:7052
@@ -138,8 +138,8 @@ services:
         - /var/run/:/host/var/run/
         - ../crypto-config/peerOrganizations/org2.example.com/peers/peer1.org2.example.com/msp:/etc/hyperledger/fabric/msp
         - ../crypto-config/peerOrganizations/org2.example.com/peers/peer1.org2.example.com/tls:/etc/hyperledger/fabric/tls
-        - ../config/decorations_4.yaml:/opt/gopath/src/github.com/hyperledger/fabric/sampleconfig/decoration.yaml
-        - ../config/core.yaml:/opt/gopath/src/github.com/hyperledger/fabric/sampleconfig/core.yaml
+        - ../config/decorations_4.yaml:/etc/hyperledger/fabric/decoration.yaml
+        - ../config/core.yaml:/etc/hyperledger/fabric/core.yaml
     ports:
       - 10051:7051
       - 10052:7052

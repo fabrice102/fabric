@@ -41,16 +41,15 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 	decorations := stub.GetDecorations()
 
 	//function := string(args[0])
-	masterStr := string(decorations["target"])
-	//master := true
-	//if masterStr == "false" {
-	//	master = false
-	//}
+	masterStr := string(decorations["master"])
+	master := true
+	if masterStr == "false" {
+		master = false
+	}
 	target := string(decorations["target"])
 	input := decorations["input"]
 
-	fmt.Printf("Decorations: [%s][%s][%s]\n", masterStr, target, string(input))
-
+	fmt.Printf("Decorations: [%s][%s][%s]\n", master, target, string(input))
 
 	fmt.Println("ex02 Invoke")
 	function, args := stub.GetFunctionAndParameters()
