@@ -18,13 +18,15 @@ package main
 
 import (
 	"fmt"
+	"log"
 
 	"strconv"
+
+	"time"
 
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/mpc"
 	pb "github.com/hyperledger/fabric/protos/peer"
-	"time"
 )
 
 type MPCExampleChaincode struct {
@@ -71,7 +73,7 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 		fmt.Println("master 1")
 
 		fmt.Println("wait a bit")
-		time.Sleep(time.Second * 30)
+		time.Sleep(time.Second * 10)
 		fmt.Println("send")
 		// First send, then receive
 		err := channel.Send(input, target)
@@ -107,6 +109,22 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 		}
 		fmt.Println("slave 6")
 	}
+
+	msg := make([]byte, 1024000)
+	var msg2 []byte
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+
+	log.Printf("start 10*1024000 - ping pong benchmark")
+	for i := 0; i < 10; i++ {
+		if master {
+			_ = channel.Send(msg, target)
+			_, _ = channel.Receive(len(msg))
+		} else {
+			msg2, _ = channel.Receive(len(msg))
+			_ = channel.Send(msg2, target)
+		}
+	}
+	log.Printf("stop 10*1024000")
 
 	return shim.Success(nil)
 }

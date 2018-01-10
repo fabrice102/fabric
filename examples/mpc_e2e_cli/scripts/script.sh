@@ -247,8 +247,12 @@ instantiateChaincode 0
 echo "Querying chaincode on org1/peer0..."
 chaincodeQuery 0 100
 
-#Invoke on chaincode on Peer0/Org1
-echo "Sending invoke transaction on org1/peer0..."
+#Query on chaincode on Peer1/Org1
+echo "Querying chaincode on org1/peer1..."
+chaincodeQuery 1 100
+
+#Invoke on chaincode on Peer0/Org1 + Peer1/Org1
+echo "Sending invoke transaction on org1/peer0 + org1/peer1..."
 chaincodeInvoke 0
 
 echo
