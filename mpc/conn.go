@@ -13,8 +13,8 @@ type Channel interface {
 /* Dream interface ideally non-blocking */
 // Rename Channel into Conn
 
-// We want a function:
-// newConn(targetPeer string, sessionID string)
+// We want a function blocking (timeout):
+// NewConn(stub shim.ChaincodeStubInterface, targetPeer string, sessionID string) (Conn, error)
 
 type Conn interface {
 	io.Writer
