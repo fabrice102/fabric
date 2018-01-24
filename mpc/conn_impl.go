@@ -13,19 +13,61 @@ const (
 	RECEIVE  = "receive"
 )
 
-type commSCCChannel struct {
-	stub      shim.ChaincodeStubInterface
-	sessionID []byte
+type commSCCConn struct {
+	stub       shim.ChaincodeStubInterface
+	sessionID  []byte
+	targetPeer []byte
 }
 
-// NewCommSCCChannel creates a new Channel backed by the comm scc
-// and using txID as sessionID
-func NewCommSCCChannel(stub shim.ChaincodeStubInterface) Channel {
-	sessionID := []byte(stub.GetTxID())
-	fmt.Printf("Session ID: [%v]\n", string(sessionID))
-	return &commSCCChannel{stub: stub, sessionID: sessionID}
+// NewCommSCCConn creates a new connection conn backed by the comm scc
+func NewConn(stub shim.ChaincodeStubInterface, sessionID string, targetPeer string) (Conn, error) {
+	return &commSCCConn{
+		stub:       stub,
+		sessionID:  []byte(sessionID),
+		targetPeer: []byte(targetPeer),
+	}, nil
 }
 
+func (c *commSCCConn) Write(data []byte) (n int, err error) {
+	r := c.stub.InvokeChaincode(
+		COMM_SCC,
+		[][]byte{[]byte(SEND), data, c.sessionID, c.targetPeer},
+		"",
+	)
+
+	if r.Status != shim.OK {
+		return 0, fmt.Errorf("failed sending message to [%s]: [%s]", string(c.targetPeer), r.String())
+	}
+
+	return len(data), nil
+}
+
+func (c *commSCCConn) Read(p []byte) (n int, err error) {
+	r := c.stub.InvokeChaincode(
+		COMM_SCC,
+		[][]byte{[]byte(RECEIVE), c.sessionID},
+		"",
+	)
+
+	if r.Status != shim.OK {
+		return 0, fmt.Errorf("failed receiving message [%s][%s]", r.String(), r.Payload)
+	}
+
+	if r.Payload == nil {
+		return 0, errors.New("failed receiving message [payload is nil]")
+	}
+
+	copy(p, r.Payload)
+
+	return len(r.Payload), nil
+
+}
+
+func (c *commSCCConn) Flush() error {
+	return nil
+}
+
+/*
 func (c *commSCCChannel) Send(payload []byte, endpoint string) error {
 	fmt.Printf("[%v] Send [%v] to [%v]\n",  string(c.sessionID), string(payload), endpoint)
 
@@ -61,3 +103,4 @@ func (c *commSCCChannel) Receive(timeout int) ([]byte, error) {
 
 	return r.Payload, nil
 }
+*/
