@@ -20,12 +20,64 @@ type commSCCConn struct {
 }
 
 // NewCommSCCConn creates a new connection conn backed by the comm scc
-func NewConn(stub shim.ChaincodeStubInterface, sessionID string, targetPeer string) (Conn, error) {
-	return &commSCCConn{
+func NewConn(stub shim.ChaincodeStubInterface, sessionID string, targetPeer string, server bool) (Conn, error) {
+	conn := &commSCCConn{
 		stub:       stub,
 		sessionID:  []byte(sessionID),
 		targetPeer: []byte(targetPeer),
-	}, nil
+	}
+
+	if server {
+		for {
+			conn.Write([]byte("0"))
+
+			p := make([]byte, 1)
+			_, err := conn.Read(p)
+			/*Needs to check whether the err is due to a timeout*/
+			if err != nil {
+				continue
+			} else {
+				if string(p) == "1" {
+					conn.Write([]byte("2"))
+					break
+				}
+			}
+		}
+	} else {
+		p := make([]byte, 1)
+
+		for {
+			_, err := conn.Read(p)
+			/*Todo: should check  'len == 1'*/
+			if err != nil {
+				continue
+			} else {
+				conn.Write([]byte("1"))
+				break
+			}
+		}
+
+		for {
+			_, err := conn.Read(p)
+
+			/*Todo: should check  'len == 1'*/
+			if err != nil {
+				return nil, err
+			}
+
+			if string(p) == "0" {
+				continue
+			} else if string(p) == "2" {
+				break
+			} else {
+				return nil, fmt.Errorf("Unexpected message received by client: not equals to 0 or 2: %v", p)
+			}
+
+		}
+
+	}
+
+	return conn, nil
 }
 
 func (c *commSCCConn) Write(data []byte) (n int, err error) {

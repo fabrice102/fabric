@@ -21,8 +21,6 @@ import (
 
 	"strconv"
 
-	"time"
-
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/mpc"
 	pb "github.com/hyperledger/fabric/protos/peer"
@@ -67,7 +65,7 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 	}
 
 	//// Open channel
-	channel, err := mpc.NewConn(stub, "session1", target)
+	channel, err := mpc.NewConn(stub, "session1", target, master)
 
 	if err != nil {
 		return shim.Error(err.Error())
@@ -77,7 +75,7 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 		fmt.Println("master 1")
 
 		fmt.Println("wait a bit")
-		time.Sleep(time.Second * 10)
+		//time.Sleep(time.Second * 10)
 		fmt.Println("send")
 		// First send, then receive
 		_, err := channel.Write(input)

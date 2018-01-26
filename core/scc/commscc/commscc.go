@@ -124,7 +124,7 @@ func (scc *CommSCC) receive(stub shim.ChaincodeStubInterface) pb.Response {
 
 	// Wait for the message on the given topic for a given amount of time
 	// TODO: allow the invoker to specify the timeout
-	sub := scc.pubSub.Subscribe(topic, time.Second*240)
+	sub := scc.pubSub.Subscribe(topic, time.Second*1)
 	msg, err := sub.Listen()
 	if err != nil {
 		logger.Errorf("[%v] failed receive [%s]", topic, err)
