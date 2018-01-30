@@ -3,20 +3,23 @@ package mpc
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 )
 
 const (
-	COMM_SCC = "commscc"
-	SEND     = "send"
-	RECEIVE  = "receive"
+	COMM_SCC        = "commscc"
+	SEND            = "send"
+	RECEIVE         = "receive"
+	DEFAULT_TIMEOUT = time.Second * 240
 )
 
 type commSCCConn struct {
 	stub       shim.ChaincodeStubInterface
 	sessionID  []byte
 	targetPeer []byte
+	timeout    time.Duration
 }
 
 // NewCommSCCConn creates a new connection conn backed by the comm scc
@@ -25,9 +28,15 @@ func NewConn(stub shim.ChaincodeStubInterface, sessionID string, targetPeer stri
 		stub:       stub,
 		sessionID:  []byte(sessionID),
 		targetPeer: []byte(targetPeer),
+		timeout:    DEFAULT_TIMEOUT,
 	}
 
 	if server {
+		/* the server waits for 50 ms for the ack from the client("1").
+		 * If ack is not received, server keeps probing (sending "1")
+		 * Otherwise, server sends "2" to finish the connection setup
+		 */
+		conn.timeout = time.Millisecond * 50
 		for {
 			conn.Write([]byte("0"))
 
@@ -43,6 +52,8 @@ func NewConn(stub shim.ChaincodeStubInterface, sessionID string, targetPeer stri
 				}
 			}
 		}
+
+		conn.timeout = DEFAULT_TIMEOUT
 	} else {
 		p := make([]byte, 1)
 
@@ -95,6 +106,7 @@ func (c *commSCCConn) Write(data []byte) (n int, err error) {
 }
 
 func (c *commSCCConn) Read(p []byte) (n int, err error) {
+
 	r := c.stub.InvokeChaincode(
 		COMM_SCC,
 		[][]byte{[]byte(RECEIVE), c.sessionID},

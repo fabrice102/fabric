@@ -8,6 +8,7 @@ package commscc
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/hyperledger/fabric/common/flogging"
@@ -119,12 +120,18 @@ func (scc *CommSCC) receive(stub shim.ChaincodeStubInterface) pb.Response {
 	args := stub.GetArgs()
 	// Topic
 	topic := string(args[1])
+	// timeout in millisecond
+	timeout, err := strconv.Atoi(string(args[2]))
+	if err != nil {
+		logger.Errorf("The second argument 'timeout' needs to be an integer")
+		return shim.Error(fmt.Sprintf("The second argument 'timeout' needs to be an integer"))
+	}
 
 	logger.Infof("Receive on [%v]", topic)
 
 	// Wait for the message on the given topic for a given amount of time
 	// TODO: allow the invoker to specify the timeout
-	sub := scc.pubSub.Subscribe(topic, time.Second*1)
+	sub := scc.pubSub.Subscribe(topic, time.Millisecond*time.Duration(timeout))
 	msg, err := sub.Listen()
 	if err != nil {
 		logger.Errorf("[%v] failed receive [%s]", topic, err)
