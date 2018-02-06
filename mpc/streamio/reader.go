@@ -56,6 +56,10 @@ func (r *Reader) Read(p []byte) (int, error) {
 	//how much more message can we fit
 	pLeft := pLen - n
 
+	if pLeft == 0 {
+		return n, err
+	}
+
 	//only read if the buffer is empty
 	//if r.buf == nil || len(r.buf) == 0 {
 	r.buf, err = r.mr.Read()
@@ -68,8 +72,12 @@ func (r *Reader) Read(p []byte) (int, error) {
 
 	//p may be smaller than the buffer we just read
 
-	lNewMessage := math.Min((float64)(n+len(r.buf)), (float64)(pLen))
-	copy(p[n:pLen], r.buf)
+	lNewMessage := (int)(math.Min((float64)(n+len(r.buf)), (float64)(pLen)))
+	copy(p[n:lNewMessage], r.buf)
+	//p = p[0:lNewMessage]
+	for i := lNewMessage; i < pLen; i++ {
+		p[i] = 0
+	}
 	n = (int)(lNewMessage)
 	//len(r.buf)
 

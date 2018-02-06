@@ -52,6 +52,7 @@ func TestRead(t *testing.T) {
 	//nRead, err = r.Read(buf)
 	fmt.Printf("Read buffer: [%s]\n", buf)
 
+	//buf = buf[:0]
 	_, _ = reader.Read(buf)
 	fmt.Printf("2nd Read buffer: [%s]\n", buf)
 	//show nRead
