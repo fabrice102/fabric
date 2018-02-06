@@ -51,9 +51,6 @@ func TestRead(t *testing.T) {
 	//_ = buf
 	//nRead, err = r.Read(buf)
 	fmt.Printf("Read buffer: [%v]\n", buf)
-	//buf = nil
-	//buf = make([]byte, 12)
-	reader.buf = nil
 
 	_, _ = reader.Read(buf)
 	fmt.Printf("2nd Read buffer: [%v]\n", buf)
