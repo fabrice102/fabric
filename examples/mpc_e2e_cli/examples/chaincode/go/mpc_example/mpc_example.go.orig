@@ -18,8 +18,11 @@ package main
 
 import (
 	"fmt"
+	"log"
 
 	"strconv"
+
+	"time"
 
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/mpc"
@@ -65,88 +68,64 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 	}
 
 	//// Open channel
-	channel, err := mpc.NewConn(stub, "session1", target, master)
-
-	if err != nil {
-		return shim.Error(err.Error())
-	}
-
+	channel := mpc.NewCommSCCChannel(stub)
 	if master {
 		fmt.Println("master 1")
 
 		fmt.Println("wait a bit")
-		//time.Sleep(time.Second * 10)
+		time.Sleep(time.Second * 10)
 		fmt.Println("send")
 		// First send, then receive
-		_, err := channel.Write(input)
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-
+		err := channel.Send(input, target)
 		fmt.Printf("master 2, err [%s]\n", err)
 		if err != nil {
 			fmt.Printf("master 3, err [%s]", err)
 			return shim.Error(err.Error())
 		}
 		fmt.Printf("master 4, err [%s]\n", err)
-
-		p := make([]byte, len(input))
-		_, err = channel.Read(p)
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-
+		res, err := channel.Receive(10)
 		if err != nil {
 			fmt.Printf("master 5, err [%s]", err)
 			return shim.Error(err.Error())
 		}
 		fmt.Println("master 6")
-		fmt.Printf("got [%v] from [%s]", p, target)
+		fmt.Printf("got [%v] from [%s]", res, target)
 	} else {
 		// First receive, then send
 		fmt.Println("slave 1")
-		p := make([]byte, len(input))
-		_, err = channel.Read(p)
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-
+		res, err := channel.Receive(10)
 		fmt.Printf("slave 2, err [%v]\n", err)
 		if err != nil {
 			fmt.Printf("slave 3, err [%s]", err)
 			return shim.Error(err.Error())
 		}
 		fmt.Println("slave 4")
-		fmt.Printf("got [%v] from [%s]", p, target)
+		fmt.Printf("got [%v] from [%s]", res, target)
 
-		_, err = channel.Write(input)
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-
+		err = channel.Send(input, target)
 		if err != nil {
 			fmt.Printf("slave 5, err [%s]", err)
 			return shim.Error(err.Error())
 		}
 		fmt.Println("slave 6")
 	}
-	/*
-		msg := make([]byte, 1024000)
-		var msg2 []byte
-		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
-		log.Printf("start 10*1024000 - ping pong benchmark")
-		for i := 0; i < 10; i++ {
-			if master {
-				_, err = channel.Write(msg)
-				_, _ = channel.Read()
-			} else {
-				msg2, _ = channel.Read()
-				_ = channel.Write(msg2)
-			}
+	msg := make([]byte, 1024000)
+	var msg2 []byte
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+
+	log.Printf("start 10*1024000 - ping pong benchmark")
+	for i := 0; i < 10; i++ {
+		if master {
+			_ = channel.Send(msg, target)
+			_, _ = channel.Receive(len(msg))
+		} else {
+			msg2, _ = channel.Receive(len(msg))
+			_ = channel.Send(msg2, target)
 		}
-		log.Printf("stop 10*1024000")
-	*/
+	}
+	log.Printf("stop 10*1024000")
+
 	return shim.Success(nil)
 }
 
