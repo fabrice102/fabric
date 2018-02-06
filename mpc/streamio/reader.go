@@ -39,6 +39,7 @@ func (r *Reader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 
+	copy(p, r.buf)
 	n := len(r.buf)
 
 	//check its size nb - if it is longer than n, then return n bytes and save the rest of the nb-n bytes

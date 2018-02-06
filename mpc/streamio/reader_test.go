@@ -1,6 +1,9 @@
 package streamio
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 type MockMessageReader struct {
 	messages [][]byte
@@ -19,7 +22,7 @@ func (m *MockMessageReader) Read() ([]byte, error) {
 	if len(m.messages) > 0 {
 		//remove message from buffer
 		retBuf = m.messages[0]
-		copy(m.messages, m.messages[1:])
+		m.messages = m.messages[1:]
 		return retBuf, nil
 	}
 
@@ -29,19 +32,25 @@ func (m *MockMessageReader) Read() ([]byte, error) {
 
 func TestRead(t *testing.T) {
 	var buf []byte
+	buf = make([]byte, 12)
 	//var nRead int
 	//var err error
 
 	mrr := newMockMessageReader([][]byte{
-		{}
+		[]byte("hello"),
+		[]byte("world"),
 	})
-	r.buf = []byte("test")
+
+	reader := NewReader(mrr)
+	_, _ = reader.Read(buf)
+	//buf = []byte("test")
 
 	//create a fake message reader
 
-	_, _ = r.Read(buf)
+	//buf, _ = mrr.Read()
+	//_ = buf
 	//nRead, err = r.Read(buf)
-
+	fmt.Printf("Read buffer: [%v]\n", buf)
 	//show nRead
 
 }
