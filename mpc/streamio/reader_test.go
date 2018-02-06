@@ -37,8 +37,8 @@ func TestRead(t *testing.T) {
 	//var err error
 
 	mrr := newMockMessageReader([][]byte{
+		[]byte("longbuffertest"),
 		[]byte("hello"),
-		[]byte("world"),
 	})
 
 	reader := NewReader(mrr)
@@ -50,10 +50,10 @@ func TestRead(t *testing.T) {
 	//buf, _ = mrr.Read()
 	//_ = buf
 	//nRead, err = r.Read(buf)
-	fmt.Printf("Read buffer: [%v]\n", buf)
+	fmt.Printf("Read buffer: [%s]\n", buf)
 
 	_, _ = reader.Read(buf)
-	fmt.Printf("2nd Read buffer: [%v]\n", buf)
+	fmt.Printf("2nd Read buffer: [%s]\n", buf)
 	//show nRead
 
 }
