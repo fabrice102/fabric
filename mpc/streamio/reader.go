@@ -1,5 +1,7 @@
 package streamio
 
+import "math"
+
 // MessageReader wraps a message-based Read function
 type MessageReader interface {
 	// Returns the next message.
@@ -29,10 +31,35 @@ func (r *Reader) Read(p []byte) (int, error) {
 	//create a buffer in the reader
 
 	var err error
-	//only read if the buffer is empty
-	if r.buf == nil || len(r.buf) == 0 {
-		r.buf, err = r.mr.Read()
+	var n int
+
+	n = len(r.buf)
+	pLen := len(p)
+
+	//start by copying the leftover data from r.buf
+	if r.buf != nil {
+		copy(p, r.buf)
+
+		if pLen < n {
+			r.buf = r.buf[(len(p)):(len(r.buf))]
+		} else {
+			r.buf = nil
+		}
+
+		//we're OK either way
+		// if pLen <= n {
+		// 	return n, err
+		// }
 	}
+	//here we have the previous message copied
+
+	//how much more message can we fit
+	pLeft := pLen - n
+
+	//only read if the buffer is empty
+	//if r.buf == nil || len(r.buf) == 0 {
+	r.buf, err = r.mr.Read()
+	//}
 
 	if r.buf == nil || err != nil {
 		r.buf = nil
@@ -41,11 +68,13 @@ func (r *Reader) Read(p []byte) (int, error) {
 
 	//p may be smaller than the buffer we just read
 
-	copy(p, r.buf)
-	n := len(r.buf)
+	lNewMessage := math.Min((float64)(n+len(r.buf)), (float64)(pLen))
+	copy(p[n:pLen], r.buf)
+	n = (int)(lNewMessage)
+	//len(r.buf)
 
-	if len(p) < len(r.buf) {
-		r.buf = r.buf[(len(p) + 1):(len(r.buf))]
+	if pLeft < len(r.buf) {
+		r.buf = r.buf[pLeft:(len(r.buf))]
 	} else {
 		r.buf = nil
 	}
