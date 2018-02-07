@@ -1,7 +1,5 @@
 package streamio
 
-import "math"
-
 // MessageReader wraps a message-based Read function
 type MessageReader interface {
 	// Returns the next message.
@@ -23,75 +21,38 @@ func NewReader(mr MessageReader) *Reader {
 	return &r
 }
 
+func min(x, y int) int {
+	if x < y {
+		return x
+	}
+	return y
+}
+
 // Read implements the read function in io.Reader
 func (r *Reader) Read(p []byte) (int, error) {
-	//get the message from the buffer, otherwise call the MessageReader
-	//define my own byte buffer
-	//use the call to the function
-	//create a buffer in the reader
-
 	var err error
-	var n int
 
-	n = len(r.buf)
-	pLen := len(p)
+	// If no leftover data in r.buf, read the next message
+	if len(r.buf) == 0 {
+		r.buf, err = r.mr.Read()
 
-	//start by copying the leftover data from r.buf
-	if r.buf != nil {
-		copy(p, r.buf)
-
-		if pLen < n {
-			r.buf = r.buf[(len(p)):(len(r.buf))]
-		} else {
+		if r.buf == nil || err != nil {
 			r.buf = nil
+			return 0, err
 		}
-
-		//we're OK either way
-		// if pLen <= n {
-		// 	return n, err
-		// }
-	}
-	//here we have the previous message copied
-
-	//how much more message can we fit
-	pLeft := pLen - n
-
-	if pLeft == 0 {
-		return n, err
 	}
 
-	//only read if the buffer is empty
-	//if r.buf == nil || len(r.buf) == 0 {
-	r.buf, err = r.mr.Read()
-	//}
+	pLen := len(p)
+	rBufLen := len(r.buf)
 
-	if r.buf == nil || err != nil {
-		r.buf = nil
-		return 0, err
-	}
+	copy(p, r.buf)
+	n := min(pLen, rBufLen)
 
-	//p may be smaller than the buffer we just read
-
-	lNewMessage := (int)(math.Min((float64)(n+len(r.buf)), (float64)(pLen)))
-	copy(p[n:lNewMessage], r.buf)
-	//p = p[0:lNewMessage]
-	for i := lNewMessage; i < pLen; i++ {
-		p[i] = 0
-	}
-	n = (int)(lNewMessage)
-	//len(r.buf)
-
-	if pLeft < len(r.buf) {
-		r.buf = r.buf[pLeft:(len(r.buf))]
+	if pLen < rBufLen {
+		r.buf = r.buf[pLen:]
 	} else {
 		r.buf = nil
 	}
-
-	//check its size nb - if it is longer than n, then return n bytes and save the rest of the nb-n bytes
-	//if an error occurred, return it
-
-	//copy from r.buf to p, max length of p
-	//return size of data read
 
 	return n, err
 }

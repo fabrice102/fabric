@@ -1,7 +1,6 @@
 package streamio
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -32,29 +31,37 @@ func (m *MockMessageReader) Read() ([]byte, error) {
 
 func TestRead(t *testing.T) {
 	var buf []byte
-	buf = make([]byte, 12)
-	//var nRead int
-	//var err error
+
+	buf = make([]byte, 7)
 
 	mrr := newMockMessageReader([][]byte{
-		[]byte("longbuffertest"),
 		[]byte("hello"),
+		[]byte("world"),
+		[]byte(" my "),
+		[]byte(" name "),
+		[]byte(" is streamio!"),
 	})
 
+	res := []byte("helloworld my  name  is streamio!")
+
 	reader := NewReader(mrr)
-	_, _ = reader.Read(buf)
-	//buf = []byte("test")
 
-	//create a fake message reader
+	// We are doing 4 reads of at most 7 characters
+	for i := 0; i < 4; i++ {
+		n, err := reader.Read(buf)
 
-	//buf, _ = mrr.Read()
-	//_ = buf
-	//nRead, err = r.Read(buf)
-	fmt.Printf("Read buffer: [%s]\n", buf)
+		if err != nil {
+			t.Errorf("Expected err to be nil but was %v", err)
+		}
 
-	//buf = buf[:0]
-	_, _ = reader.Read(buf)
-	fmt.Printf("2nd Read buffer: [%s]\n", buf)
-	//show nRead
+		if !(n > 0 && n <= len(buf)) {
+			t.Errorf("The returned length should be > 0 and <= %v, but was %v", len(buf), n)
+		}
 
+		if string(buf[:n]) != string(res[:n]) {
+			t.Errorf("Wrong value read in the buffer. Expecting %v. Was %v", string(buf[:n]), string(res[:n]))
+		}
+
+		res = res[n:]
+	}
 }
