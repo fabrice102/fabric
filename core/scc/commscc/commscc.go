@@ -7,16 +7,21 @@ SPDX-License-Identifier: Apache-2.0
 package commscc
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/gossip/comm"
 	"github.com/hyperledger/fabric/gossip/service"
 	"github.com/hyperledger/fabric/gossip/util"
 	"github.com/hyperledger/fabric/protos/gossip"
+	"github.com/hyperledger/fabric/protos/msp"
 	pb "github.com/hyperledger/fabric/protos/peer"
 )
 
@@ -122,6 +127,9 @@ func (scc *CommSCC) receive(stub shim.ChaincodeStubInterface) pb.Response {
 	topic := string(args[1])
 	// timeout in millisecond
 	timeout, err := strconv.Atoi(string(args[2]))
+	// source peer
+	endpoint := string(args[3])
+
 	if err != nil {
 		logger.Errorf("The second argument 'timeout' needs to be an integer")
 		return shim.Error(fmt.Sprintf("The second argument 'timeout' needs to be an integer"))
@@ -132,14 +140,28 @@ func (scc *CommSCC) receive(stub shim.ChaincodeStubInterface) pb.Response {
 	// Wait for the message on the given topic for a given amount of time
 	// TODO: allow the invoker to specify the timeout
 	sub := scc.pubSub.Subscribe(topic, time.Millisecond*time.Duration(timeout))
-	msg, err := sub.Listen()
+	msgRaw, err := sub.Listen()
 	if err != nil {
 		logger.Errorf("[%v] failed receive [%s]", topic, err)
 		return shim.Error(fmt.Sprintf("[%v] failed receive [%s]", topic, err))
 	}
 
+	msg := msgRaw.(gossip.ReceivedMessage)
+
+	sID := &msp.SerializedIdentity{}
+	proto.Unmarshal(msg.GetConnectionInfo().Identity, sID)
+	bl, _ := pem.Decode(sID.IdBytes)
+	cert, _ := x509.ParseCertificate(bl.Bytes)
+	actualEndPoint := cert.Subject.CommonName
+
+	// Check the certificate to tell who is the sender
+	if strings.Compare(strings.Split(endpoint, ":")[0], actualEndPoint) != 0 {
+		logger.Errorf("Expected to receive msg from [%s], not [%s]", endpoint, actualEndPoint)
+		return shim.Error(fmt.Sprintf("Expected to receive msg from [%s], not [%s]", endpoint, actualEndPoint))
+	}
+
 	// Given init, we expect to see a ReceivedMessage here.
-	mpcData := msg.(gossip.ReceivedMessage).GetGossipMessage().GetMpcData()
+	mpcData := msg.GetGossipMessage().GetMpcData()
 	if mpcData == nil {
 		logger.Errorf("[%v] received empty mpc message.", topic)
 		return shim.Error(fmt.Sprintf("[%s] received empty mpc message.", topic))

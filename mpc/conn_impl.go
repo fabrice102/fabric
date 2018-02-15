@@ -3,6 +3,7 @@ package mpc
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/hyperledger/fabric/core/chaincode/shim"
@@ -107,9 +108,10 @@ func (c *commSCCConn) Write(data []byte) (n int, err error) {
 
 func (c *commSCCConn) Read(p []byte) (n int, err error) {
 
+	timeout := []byte(strconv.FormatInt(c.timeout.Nanoseconds()/int64(1000000), 10))
 	r := c.stub.InvokeChaincode(
 		COMM_SCC,
-		[][]byte{[]byte(RECEIVE), c.sessionID},
+		[][]byte{[]byte(RECEIVE), c.sessionID, timeout, c.targetPeer},
 		"",
 	)
 
