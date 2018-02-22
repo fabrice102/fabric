@@ -4,18 +4,18 @@ import (
 	"testing"
 )
 
-type MockMessageReader struct {
+type MockMsgReader struct {
 	messages [][]byte
 }
 
 //read each message and move it from the stack
-func newMockMessageReader(messages [][]byte) *MockMessageReader {
-	return &MockMessageReader{
+func newMockMessageReader(messages [][]byte) *MockMsgReader {
+	return &MockMsgReader{
 		messages: messages,
 	}
 }
 
-func (m *MockMessageReader) Read() ([]byte, error) {
+func (m *MockMsgReader) Read() ([]byte, error) {
 	var retBuf []byte
 
 	if len(m.messages) > 0 {

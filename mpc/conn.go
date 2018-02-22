@@ -4,12 +4,6 @@ import (
 	"io"
 )
 
-type Channel interface {
-	Send(payload []byte, endpoint string) error
-
-	Receive(timeout int) ([]byte, error)
-}
-
 /* Dream interface ideally non-blocking */
 // Rename Channel into Conn
 

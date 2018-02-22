@@ -1,7 +1,7 @@
 package streamio
 
-// MessageReader wraps a message-based Read function
-type MessageReader interface {
+// MsgReader wraps a message-based Read function
+type MsgReader interface {
 	// Returns the next message.
 	// If no message available, return nil, nil
 	Read() ([]byte, error)
@@ -9,12 +9,12 @@ type MessageReader interface {
 
 // Reader implements a streaming io.Reader from a MessageReader
 type Reader struct {
-	mr  MessageReader
+	mr  MsgReader
 	buf []byte
 }
 
 // NewReader creates a streaming reader from a MessageReader
-func NewReader(mr MessageReader) *Reader {
+func NewReader(mr MsgReader) *Reader {
 	r := Reader{
 		mr: mr,
 	}
