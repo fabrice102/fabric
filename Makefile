@@ -35,7 +35,7 @@
 #   - dist-clean - clean release packages for all target platforms
 #   - unit-test-clean - cleans unit test state (particularly from docker)
 
-BASE_VERSION = 1.1.0-alpha
+BASE_VERSION = 1.1.0-alpha-mpc
 PREV_VERSION = 1.1.0-preview
 # Allow to build as a submodule setting the main project to
 # the PROJECT_NAME env variable, for example,
@@ -45,7 +45,7 @@ PROJECT_NAME = $(PROJECT_NAME)/fabric
 else
 PROJECT_NAME = hyperledger/fabric
 endif
-IS_RELEASE = false
+IS_RELEASE = true
 EXPERIMENTAL ?= true
 
 ifeq ($(EXPERIMENTAL),true)
