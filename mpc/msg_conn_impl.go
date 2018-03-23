@@ -21,6 +21,9 @@ type commSCCMsgConn struct {
 	sessionID  []byte
 	targetPeer []byte
 	timeout    time.Duration
+
+	writeCounter byte
+	readCounter  byte
 }
 
 // NewCommSCCConn creates a new connection conn backed by the comm scc
@@ -30,6 +33,9 @@ func NewMsgConn(stub shim.ChaincodeStubInterface, sessionID string, targetPeer s
 		sessionID:  []byte(sessionID),
 		targetPeer: []byte(targetPeer),
 		timeout:    DEFAULT_TIMEOUT,
+
+		writeCounter: 0,
+		readCounter:  0,
 	}
 
 	if server {
@@ -42,10 +48,10 @@ func NewMsgConn(stub shim.ChaincodeStubInterface, sessionID string, targetPeer s
 		//fmt.Printf("******MASTER starts \n")
 		for {
 			//fmt.Printf("******MASTER sends '0' \n")
-			conn.Write([]byte("0"))
+			conn.RawWrite([]byte("0"))
 
 			fmt.Printf("******MASTER tries to read '1' \n")
-			p, err := conn.Read()
+			p, err := conn.RawRead()
 			/*Needs to check whether the err is due to a timeout*/
 			if err != nil {
 				fmt.Printf("******MASTER continue tries to read '1'")
@@ -54,7 +60,7 @@ func NewMsgConn(stub shim.ChaincodeStubInterface, sessionID string, targetPeer s
 				fmt.Printf("******MASTER gets something from read")
 				if string(p) == "1" {
 					fmt.Printf("******MASTER gets '1' from read, and sends '2' \n")
-					conn.Write([]byte("2"))
+					conn.RawWrite([]byte("2"))
 					break
 				}
 			}
@@ -66,21 +72,21 @@ func NewMsgConn(stub shim.ChaincodeStubInterface, sessionID string, targetPeer s
 		fmt.Printf("~~~~~~SLAVE starts \n")
 		for {
 			fmt.Printf("~~~~~~SLAVE tries to read '0' \n")
-			_, err := conn.Read()
+			_, err := conn.RawRead()
 			/*Todo: should check  'len == 1'*/
 			if err != nil {
 				fmt.Printf("~~~~~~SLAVE continue tries to read '0' \n")
 				continue
 			} else {
 				fmt.Printf("~~~~~~SLAVE get something from read, and sends '1' \n")
-				conn.Write([]byte("1"))
+				conn.RawWrite([]byte("1"))
 				break
 			}
 		}
 
 		for {
 			//fmt.Printf("~~~~~~SLAVE tries to read '2' \n")
-			p, err := conn.Read()
+			p, err := conn.RawRead()
 
 			/*Todo: should check  'len == 1'*/
 			if err != nil {
@@ -105,7 +111,8 @@ func NewMsgConn(stub shim.ChaincodeStubInterface, sessionID string, targetPeer s
 	return conn, nil
 }
 
-func (c *commSCCMsgConn) Write(data []byte) (n int, err error) {
+// Ths will be the Write to be used
+func (c *commSCCMsgConn) RawWrite(data []byte) (n int, err error) {
 	r := c.stub.InvokeChaincode(
 		COMM_SCC,
 		[][]byte{[]byte(SEND), data, c.sessionID, c.targetPeer},
@@ -119,8 +126,17 @@ func (c *commSCCMsgConn) Write(data []byte) (n int, err error) {
 	return len(data), nil
 }
 
-func (c *commSCCMsgConn) Read() (p []byte, err error) {
+// Debugging purpose: appending a counter in front of each message to check whether there is any message missing
+func (c *commSCCMsgConn) Write(data []byte) (n int, err error) {
+	time.Sleep(time.Millisecond * 200)
+	data = append([]byte{c.writeCounter}, data...)
+	fmt.Printf("Write: write message %v, [%v]\n", c.writeCounter, data)
+	c.writeCounter++
 
+	return c.RawWrite(data)
+}
+
+func (c *commSCCMsgConn) RawRead() (p []byte, err error) {
 	timeout := []byte(strconv.FormatInt(c.timeout.Nanoseconds()/int64(1000000), 10))
 	r := c.stub.InvokeChaincode(
 		COMM_SCC,
@@ -138,6 +154,24 @@ func (c *commSCCMsgConn) Read() (p []byte, err error) {
 
 	return r.Payload, nil
 
+}
+
+func (c *commSCCMsgConn) Read() (p []byte, err error) {
+	p, err = c.RawRead()
+
+	if len(p) < 1 {
+		fmt.Printf("Read: missing the counter\n")
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("Read: receive msg %v; my counter is %v, [%v]\n", p[0], c.readCounter, p[1:])
+
+	c.readCounter++
+
+	return p[1:], nil
 }
 
 func (c *commSCCMsgConn) Flush() error {
