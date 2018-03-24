@@ -8,7 +8,6 @@ package commscc
 
 import (
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"strconv"
@@ -20,11 +19,12 @@ import (
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/gossip/discovery"
 	gossip_svc "github.com/hyperledger/fabric/gossip/gossip"
-	"github.com/hyperledger/fabric/gossip/service"
 	"github.com/hyperledger/fabric/gossip/util"
 	"github.com/hyperledger/fabric/protos/gossip"
 	"github.com/hyperledger/fabric/protos/msp"
 	pb "github.com/hyperledger/fabric/protos/peer"
+	"sync"
+	"github.com/hyperledger/fabric/gossip/service"
 )
 
 var logger = flogging.MustGetLogger("commscc")
@@ -43,6 +43,7 @@ const (
 type action func(stub shim.ChaincodeStubInterface) pb.Response
 
 type CommSCC struct {
+	sync.Mutex
 	pubSub  *util.PubSub
 	actions map[string]action
 	gossip_svc.Gossip
@@ -52,7 +53,6 @@ type CommSCC struct {
 func NewCommSCC() *CommSCC {
 	c := &CommSCC{
 		pubSub:   util.NewPubSub(),
-		Gossip:   service.GetGossipService(),
 		msgStore: NewMessageStore(),
 	}
 	c.actions = map[string]action{
@@ -63,28 +63,58 @@ func NewCommSCC() *CommSCC {
 	return c
 }
 
+func waitForGossip() {
+	for {
+		gossipSvc := service.GetGossipService()
+		if gossipSvc != nil {
+			return
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 func (scc *CommSCC) listen() {
+	waitForGossip()
+	scc.Gossip = service.GetGossipService()
+	logger.Info(">>> Gossip instance established")
 	_, rmc := scc.Accept(mpcMessageAcceptor, true)
 	for msg := range rmc {
-		mpcMsg := msg.GetGossipMessage().GetMpcData()
-		session := mpcMsg.Payload.SessionID
-		addr := msg.GetConnectionInfo().Endpoint
-		logger.Debugf("Message from %s in session %s, contains payload of %d bytes", addr, string(session), len(mpcMsg.Payload.Data))
-		// Notify the other side we've received the message
-		msg.Ack(nil)
-		// Probe to see if some receive operation is interested in this session
-		err := scc.pubSub.Publish(hex.EncodeToString(session), msg)
-		if err == nil {
-			continue
-		}
-		// If the publish failed we need to save the message
-		scc.msgStore.Put(hex.EncodeToString(session), msg)
-
-		// Cleanup in any case
-		time.AfterFunc(maxMessageSaveTime, func() {
-			scc.msgStore.Remove(hex.EncodeToString(session))
-		})
+		logger.Info(">>>> Got message", string(msg.GetGossipMessage().GetMpcData().Payload.Data), "from", msg.GetConnectionInfo().Endpoint)
+		scc.handleMessage(msg)
 	}
+}
+
+func (scc *CommSCC) handleMessage(msg gossip.ReceivedMessage) {
+	mpcMsg := msg.GetGossipMessage().GetMpcData()
+	session := mpcMsg.Payload.SessionID
+	addr := msg.GetConnectionInfo().Endpoint
+	logger.Infof(">>> Message from %s in session %s, contains payload of %d bytes", addr, string(session), len(mpcMsg.Payload.Data))
+	// Notify the other side we've received the message
+	msg.Ack(nil)
+	scc.relayMessageToReceivers(msg, string(session))
+}
+
+func (scc *CommSCC) relayMessageToReceivers(msg gossip.ReceivedMessage, session string) {
+	// Probe to see if some receive operation is interested in this session
+	err := scc.pubSub.Publish(session, msg)
+	if err == nil {
+		logger.Info(">>> publish succeeded")
+		return
+	}
+	logger.Info(">>>> publish failed")
+
+	// If the publish failed we need to save the message
+	scc.msgStore.Put(session, msg)
+
+	// Cleanup in any case
+	time.AfterFunc(maxMessageSaveTime, func() {
+		logger.Info("Purging messages related to", session)
+		scc.msgStore.Remove(session)
+	})
+
+	// Publish again, because the receive operation may have missed the message store if it
+	// came too early to the comm scc
+	scc.pubSub.Publish(session, msg)
 }
 
 func (scc *CommSCC) Init(stub shim.ChaincodeStubInterface) pb.Response {
@@ -95,7 +125,7 @@ func (scc *CommSCC) Init(stub shim.ChaincodeStubInterface) pb.Response {
 func (scc *CommSCC) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 	function, _ := stub.GetFunctionAndParameters()
 
-	logger.Debugf("commscc invoked function [%s]", function)
+	logger.Infof("commscc invoked function [%s]", function)
 	action, exists := scc.actions[function]
 	if exists {
 		return action(stub)
@@ -146,53 +176,70 @@ func (scc *CommSCC) send(stub shim.ChaincodeStubInterface) pb.Response {
 }
 
 func (scc *CommSCC) receive(stub shim.ChaincodeStubInterface) pb.Response {
-	// Read a message from topic args[1]
-	args := stub.GetArgs()
-	// Topic
-	topic := string(args[1])
-	// timeout in millisecond
-	timeout, err := strconv.Atoi(string(args[2]))
-	// source peer
-	endpoint := string(args[3])
-
-	if err != nil {
-		logger.Errorf("The second argument 'timeout' needs to be an integer")
-		return shim.Error(fmt.Sprintf("The second argument 'timeout' needs to be an integer"))
+	rStub := ReceivedStub{stub}
+	if err := rStub.Validate(); err != nil {
+		return shim.Error(err.Error())
 	}
+	topic := rStub.Topic()
+	endpoint := rStub.Endpoint()
 
 	logger.Infof("Receive on [%v]", topic)
 
-	var totalMessages []gossip.ReceivedMessage
-	// First, check if we have messages waiting for us
-	waitingMessages := scc.msgStore.MsgsByID(topic)
-	totalMessages = append(totalMessages, waitingMessages...)
-	scc.msgStore.Remove(topic)
+	// Subscribe to messages for the topic
+	sub := scc.pubSub.Subscribe(topic, time.Second * 5)
 
-	// Wait for the message on the given topic for a given amount of time
-	sub := scc.pubSub.Subscribe(topic, time.Millisecond*time.Duration(timeout))
+	// First, check if we have messages waiting for us.
+	// This may happen if we invoked Subscribe() too late
+	waitingMessages := scc.msgStore.Search(topic, messageFrom(endpoint))
+	logger.Info(">>>> collected", len(waitingMessages), "messages waiting for this session")
+	scc.msgStore.Remove(topic)
+	if len(waitingMessages) > 0 {
+		res := waitingMessages[0].GetGossipMessage().GetMpcData().Payload.Data
+		logger.Info(">>>>> Returning", string(res))
+		return shim.Success(res)
+	}
+
+	var totalMessages []gossip.ReceivedMessage
+	// Next, wait for messages that we may have received after subscribing.
+	totalMessages = append(totalMessages, drainSubscription(sub) ...)
+	logger.Info("Received", len(totalMessages), "via subscription")
+	if len(totalMessages) == 0 {
+		logger.Warningf("Didn't receive any message from %s - received %d messages", endpoint, len(totalMessages))
+		return shim.Error(fmt.Sprintf("Didn't receive any message from %s", endpoint))
+	}
+	// Grab the first message from endpoint
+	msg := totalMessages[0]
+	// Given init, we expect to see a ReceivedMessage here.
+	mpcData := msg.GetGossipMessage().GetMpcData()
+	logger.Infof("Received on [%v], [%v]", topic, mpcData.Payload.Data)
+	// TODO: check that payload is different from nil
+	return shim.Success(mpcData.Payload.Data)
+}
+
+func drainSubscription(sub util.Subscription) []gossip.ReceivedMessage {
+	var res []gossip.ReceivedMessage
 	for {
 		msgRaw, err := sub.Listen()
 		if err != nil {
 			break
 		}
 		msg := msgRaw.(gossip.ReceivedMessage)
-		totalMessages = append(totalMessages, msg)
+		res = append(res, msg)
+		logger.Info(">>>> got", string(msg.GetGossipMessage().GetMpcData().Payload.Data))
+		break
+		// Yacov: Should we wait for more messages from other peers? Ideally we have an expected number of messages we should collect
+		// so that we won't stop by timing out... Ask me if that's not clear
 	}
-
-	msg := findMessage(totalMessages, endpoint)
-	if msg == nil {
-		return shim.Error(fmt.Sprintf("Didn't receive any message from %s on session %s, but did receive %d messages", endpoint, topic, len(totalMessages)))
+	if len(res) == 0 {
+		logger.Info("Didn't find any message from subscriptions")
+	} else {
+		logger.Info("Found", len(res), "messages from subscriptions")
 	}
-	// Given init, we expect to see a ReceivedMessage here.
-	mpcData := msg.GetGossipMessage().GetMpcData()
-	logger.Infof("Received on [%v], [%v]", topic, mpcData.Payload.Data)
-
-	// TODO: check that payload is different from nil
-	return shim.Success(mpcData.Payload.Data)
+	return res
 }
 
-func findMessage(msgs []gossip.ReceivedMessage, endpoint string) gossip.ReceivedMessage {
-	for _, msg := range msgs {
+func messageFrom(endpoint string) func(gossip.ReceivedMessage) bool {
+	return func(msg gossip.ReceivedMessage) bool {
 		sID := &msp.SerializedIdentity{}
 		proto.Unmarshal(msg.GetConnectionInfo().Identity, sID)
 		bl, _ := pem.Decode(sID.IdBytes)
@@ -202,11 +249,10 @@ func findMessage(msgs []gossip.ReceivedMessage, endpoint string) gossip.Received
 		// Check the certificate to tell who is the sender
 		if strings.Compare(strings.Split(endpoint, ":")[0], actualEndPoint) != 0 {
 			logger.Warningf("Expected to receive msg from [%s], not [%s]", endpoint, actualEndPoint)
-			continue
+			return false
 		}
-		return msg
+		return true
 	}
-	return nil
 }
 
 func mpcMessageAcceptor(input interface{}) bool {
@@ -220,4 +266,31 @@ func mpcMessageAcceptor(input interface{}) bool {
 
 	// Is this message an MPC message?
 	return msg.GetGossipMessage().IsMpcData()
+}
+
+type ReceivedStub struct {
+	shim.ChaincodeStubInterface
+}
+
+func (stub ReceivedStub) Validate() error {
+	if len(stub.GetArgs()) == 4 {
+		return nil
+	}
+	return fmt.Errorf("there should be exactly 4 arguments")
+}
+
+func (stub ReceivedStub) Topic() string {
+	return string(stub.GetArgs()[1])
+}
+
+func (stub ReceivedStub) Timeout() (time.Duration, error) {
+	timeout, err := strconv.Atoi(string(stub.GetArgs()[2]))
+	if err != nil {
+		return 0, err
+	}
+	return time.Millisecond * time.Duration(timeout), nil
+}
+
+func (stub ReceivedStub) Endpoint() string {
+	return string(stub.GetArgs()[3])
 }

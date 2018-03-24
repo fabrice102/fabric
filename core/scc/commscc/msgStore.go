@@ -17,13 +17,12 @@ func NewMessageStore() *MessageStore {
 	return &MessageStore{m: make(map[string][]gossip.ReceivedMessage)}
 }
 
-// MsgsByID returns messages stored by a certain ID, or nil
-// if such an ID isn't found
-func (m *MessageStore) MsgsByID(id string) []gossip.ReceivedMessage {
+// MsgsByID returns messages stored by a certain ID and a given predicate
+func (m *MessageStore) Search(id string, filter func(msg gossip.ReceivedMessage) bool) []gossip.ReceivedMessage {
 	m.RLock()
 	defer m.RUnlock()
 	if msgs, exists := m.m[id]; exists {
-		return msgs
+		return messages(msgs).Filter(filter)
 	}
 	return nil
 }
@@ -41,18 +40,15 @@ func (m *MessageStore) Remove(id string) {
 	defer m.Unlock()
 	delete(m.m, id)
 }
-/*
-// ToSlice returns a slice backed by the elements
-// of the MessageStore
-func (m *MessageStore) ToSlice() []gossip.ReceivedMessage {
-	m.RLock()
-	defer m.RUnlock()
-	messages := make([]gossip.ReceivedMessage, len(m.m))
-	i := 0
-	for _, member := range m.m {
-		messages[i] = member
-		i++
+
+type messages []gossip.ReceivedMessage
+
+func (msgs messages) Filter(f func(msg gossip.ReceivedMessage) bool) []gossip.ReceivedMessage {
+	var res []gossip.ReceivedMessage
+	for _, msg := range msgs {
+		if f(msg) {
+			res = append(res, msg)
+		}
 	}
-	return messages
+	return res
 }
-*/
