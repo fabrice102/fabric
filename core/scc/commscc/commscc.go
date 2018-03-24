@@ -23,7 +23,6 @@ import (
 	"github.com/hyperledger/fabric/protos/gossip"
 	"github.com/hyperledger/fabric/protos/msp"
 	pb "github.com/hyperledger/fabric/protos/peer"
-	"sync"
 	"github.com/hyperledger/fabric/gossip/service"
 )
 
@@ -43,7 +42,6 @@ const (
 type action func(stub shim.ChaincodeStubInterface) pb.Response
 
 type CommSCC struct {
-	sync.Mutex
 	pubSub  *util.PubSub
 	actions map[string]action
 	gossip_svc.Gossip
