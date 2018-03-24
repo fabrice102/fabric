@@ -85,7 +85,7 @@ var systemChaincodes = []*SystemChaincode{
 		Name:              "commscc",
 		Path:              "github.com/hyperledger/fabric/core/scc/commscc",
 		InitArgs:          [][]byte{[]byte("")},
-		Chaincode:         &commscc.CommSCC{},
+		Chaincode:         commscc.NewCommSCC(),
 		InvokableExternal: false, // commscc cannot be invoked externally
 		InvokableCC2CC:    true,  // commscc can be invoked from a cc
 	},
