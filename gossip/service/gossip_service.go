@@ -167,6 +167,9 @@ func InitGossipServiceCustomDeliveryFactory(peerIdentity []byte, endpoint string
 
 // GetGossipService returns an instance of gossip service
 func GetGossipService() GossipService {
+	if gossipServiceInstance == nil {
+		return nil
+	}
 	return gossipServiceInstance
 }
 

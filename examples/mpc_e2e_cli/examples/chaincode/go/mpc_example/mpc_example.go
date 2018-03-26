@@ -22,8 +22,16 @@ import (
 	"strconv"
 
 	"github.com/hyperledger/fabric/core/chaincode/shim"
-	"github.com/hyperledger/fabric/mpc"
 	pb "github.com/hyperledger/fabric/protos/peer"
+	"time"
+)
+
+
+const (
+	COMM_SCC        = "commscc"
+	SEND            = "send"
+	RECEIVE         = "receive"
+	DEFAULT_TIMEOUT = time.Second * 10
 )
 
 type MPCExampleChaincode struct {
@@ -35,7 +43,10 @@ func (t *MPCExampleChaincode) Init(stub shim.ChaincodeStubInterface) pb.Response
 	return shim.Success(nil)
 }
 
-func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
+
+
+func (t *MPCExampleChaincode) Invoke(s shim.ChaincodeStubInterface) pb.Response {
+	stub := CommStub{s}
 	fmt.Println("Invoke")
 	// Run function arg[0] as master/slave decorations["master"]
 	// connecting to decorations["target"] on input
@@ -54,101 +65,52 @@ func (t *MPCExampleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Respon
 	}
 	target := string(decorations["target"])
 	input := decorations["input"]
-
-	fmt.Printf("Decorations: [%s][%v][%s][%s]\n", masterStr, master, target, string(input))
+	myInput, _ := strconv.ParseInt(string(input), 10, 64)
+	fmt.Println("My Input:", myInput)
+	fmt.Printf("Decorations: [%s][%v][%s][%s]\n", masterStr, master, string(target), string(input))
 
 	fmt.Println("ex02 Invoke")
 	function, args := stub.GetFunctionAndParameters()
 	if function == "query" {
-		// the old "Query" is now implemtned in invoke
+		// the old "Query" is now implemented in invoke
 		return t.query(stub, args)
 	}
 
-	//// Open channel
-	channel, err := mpc.NewConn(stub, "session1", target, master)
+	firstPhase := stub.GetTxID()
 
-	if err != nil {
-		return shim.Error(err.Error())
+	resp := stub.Send(input, firstPhase, target)
+	if resp.GetStatus() != shim.OK {
+		return shim.Error(resp.Message)
+	}
+	resp = stub.Receive(firstPhase, target)
+
+	otherInput, _ := strconv.ParseInt(string(resp.Payload), 10, 64)
+	fmt.Println("Other Input:", otherInput)
+
+	result := (myInput * otherInput) % 499
+	fmt.Println("Computed result:", result)
+	computedResult := []byte(fmt.Sprintf("%d", result))
+
+	secondPhase := stub.GetTxID() + "||2"
+
+	// Now send to the target what we computed,
+	resp = stub.Send(computedResult, secondPhase, target)
+	if resp.GetStatus() != shim.OK {
+		return shim.Error(resp.Message)
+	}
+	// and receive what it computed, to make sure it matches.
+	resp = stub.Receive(secondPhase, target)
+	otherResult, _ := strconv.ParseInt(string(resp.Payload), 10, 64)
+	fmt.Println("Other result:", otherResult)
+
+	if result != otherResult {
+		return shim.Error(fmt.Sprintf("I computed %d but other side computed %d", result, otherResult))
 	}
 
-	if master {
-		fmt.Println("master 1")
-
-		fmt.Println("wait a bit")
-		//time.Sleep(time.Second * 10)
-		fmt.Println("send")
-		// First send, then receive
-		_, err := channel.Write(input)
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-
-		fmt.Printf("master 2, err [%s]\n", err)
-		if err != nil {
-			fmt.Printf("master 3, err [%s]", err)
-			return shim.Error(err.Error())
-		}
-		fmt.Printf("master 4, err [%s]\n", err)
-
-		p := make([]byte, len(input))
-		_, err = channel.Read(p)
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-
-		if err != nil {
-			fmt.Printf("master 5, err [%s]", err)
-			return shim.Error(err.Error())
-		}
-		fmt.Println("master 6")
-		fmt.Printf("got [%v] from [%s]", p, target)
-	} else {
-		// First receive, then send
-		fmt.Println("slave 1")
-		p := make([]byte, len(input))
-		_, err = channel.Read(p)
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-
-		fmt.Printf("slave 2, err [%v]\n", err)
-		if err != nil {
-			fmt.Printf("slave 3, err [%s]", err)
-			return shim.Error(err.Error())
-		}
-		fmt.Println("slave 4")
-		fmt.Printf("got [%v] from [%s]", p, target)
-
-		_, err = channel.Write(input)
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-
-		if err != nil {
-			fmt.Printf("slave 5, err [%s]", err)
-			return shim.Error(err.Error())
-		}
-		fmt.Println("slave 6")
-	}
-	/*
-		msg := make([]byte, 1024000)
-		var msg2 []byte
-		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-
-		log.Printf("start 10*1024000 - ping pong benchmark")
-		for i := 0; i < 10; i++ {
-			if master {
-				_, err = channel.Write(msg)
-				_, _ = channel.Read()
-			} else {
-				msg2, _ = channel.Read()
-				_ = channel.Write(msg2)
-			}
-		}
-		log.Printf("stop 10*1024000")
-	*/
-	return shim.Success(nil)
+	return shim.Success([]byte(fmt.Sprintf("Combined number modulo 499 is %d", result)))
 }
+
+
 
 // query callback representing the query of a chaincode
 func (t *MPCExampleChaincode) query(stub shim.ChaincodeStubInterface, args []string) pb.Response {
@@ -156,6 +118,30 @@ func (t *MPCExampleChaincode) query(stub shim.ChaincodeStubInterface, args []str
 	fmt.Printf("Query Response:%s\n", jsonResp)
 	return shim.Success([]byte(strconv.Itoa(100)))
 }
+
+type CommStub struct {
+	shim.ChaincodeStubInterface
+}
+
+func (stub CommStub) Send(data []byte, session, target string) pb.Response{
+	fmt.Println(time.Now(), "Sending", string(data), "to", target)
+	return stub.InvokeChaincode(
+		COMM_SCC,
+		[][]byte{[]byte(SEND), data, []byte(session), []byte(target)},
+		"",
+	)
+}
+
+func (stub CommStub) Receive(session, source string) pb.Response {
+	resp := stub.InvokeChaincode(
+		COMM_SCC,
+		[][]byte{[]byte(RECEIVE), []byte(session), []byte("5000"), []byte(source)},
+		"",
+	)
+	fmt.Println(time.Now(), "Received", string(resp.Payload), resp.Message, resp.Status)
+	return resp
+}
+
 
 func main() {
 	err := shim.Start(new(MPCExampleChaincode))

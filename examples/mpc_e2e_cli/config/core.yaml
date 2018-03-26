@@ -46,13 +46,13 @@ logging:
     # Note: the modules listed below are the only acceptable modules at this
     #       time.
     cauthdsl:   warning
-    gossip:     debug
+    gossip:     warning
+    commscc:    debug
     grpc:       error
     ledger:     info
     msp:        warning
     policies:   warning
-    peer:
-        gossip: warning
+    shim:       warning
 
     # Message format for the peer logs
     format: '%{color}%{time:2006-01-02 15:04:05.000 MST} [%{module}] %{shortfunc} -> %{level:.4s} %{id:03x}%{color:reset} %{message}'

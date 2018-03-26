@@ -27,6 +27,8 @@ import (
 	"golang.org/x/net/context"
 	"sync"
 	"github.com/spf13/viper"
+	"math/rand"
+	"time"
 )
 
 // checkSpec to see if chaincode resides within current package capture for language.
@@ -346,11 +348,12 @@ func ChaincodeInvokeOrQuery(
 	var proposalResponseErrs []error
 	var wg sync.WaitGroup
 
+	rand.Seed(time.Now().UnixNano())
 	for _, endorserClient := range endorserClients {
 		wg.Add(1)
 		go func(endorserClient pb.EndorserClient) {
 			defer wg.Done()
-
+			time.Sleep(time.Duration(rand.Int31n(500)) * time.Millisecond )
 			proposalResp, err := endorserClient.ProcessProposal(context.Background(), signedProp)
 			if err != nil {
 				responseMtx.Lock()
