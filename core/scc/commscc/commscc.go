@@ -19,11 +19,11 @@ import (
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/gossip/discovery"
 	gossip_svc "github.com/hyperledger/fabric/gossip/gossip"
+	"github.com/hyperledger/fabric/gossip/service"
 	"github.com/hyperledger/fabric/gossip/util"
 	"github.com/hyperledger/fabric/protos/gossip"
 	"github.com/hyperledger/fabric/protos/msp"
 	pb "github.com/hyperledger/fabric/protos/peer"
-	"github.com/hyperledger/fabric/gossip/service"
 )
 
 var logger = flogging.MustGetLogger("commscc")
@@ -184,7 +184,14 @@ func (scc *CommSCC) receive(stub shim.ChaincodeStubInterface) pb.Response {
 	logger.Infof("Receive on [%v]", topic)
 
 	// Subscribe to messages for the topic
-	sub := scc.pubSub.Subscribe(topic, time.Second * 5)
+	timeout, err := rStub.Timeout()
+	if err != nil {
+		errMsg := fmt.Sprintf("Invalid timeout value %v\n", err)
+		logger.Error(errMsg)
+		return shim.Error(errMsg)
+	}
+
+	sub := scc.pubSub.Subscribe(topic, timeout)
 
 	// First, check if we have messages waiting for us.
 	// This may happen if we invoked Subscribe() too late
@@ -199,7 +206,7 @@ func (scc *CommSCC) receive(stub shim.ChaincodeStubInterface) pb.Response {
 
 	var totalMessages []gossip.ReceivedMessage
 	// Next, wait for messages that we may have received after subscribing.
-	totalMessages = append(totalMessages, drainSubscription(sub) ...)
+	totalMessages = append(totalMessages, drainSubscription(sub)...)
 	logger.Info("Received", len(totalMessages), "via subscription")
 	if len(totalMessages) == 0 {
 		logger.Warningf("Didn't receive any message from %s - received %d messages", endpoint, len(totalMessages))
