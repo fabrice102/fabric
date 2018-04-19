@@ -100,7 +100,7 @@ func instantiate(cmd *cobra.Command, cf *ChaincodeCmdFactory) (*common.Envelope,
 	}
 
 	logger.Info("Send instantiation proposal")
-	proposalResponse, err := cf.EndorserClients[0].ProcessProposal(context.Background(), signedProp)
+	proposalResponse, err := cf.EndorserClient.ProcessProposal(context.Background(), signedProp)
 	if err != nil {
 		return nil, fmt.Errorf("Error endorsing %s: %s", chainFuncName, err)
 	}
@@ -132,7 +132,7 @@ func chaincodeDeploy(cf *ChaincodeCmdFactory, sendInit sendInitTransaction) erro
 	defer cf.BroadcastClient.Close()
 
 	ss := &sigSupport{cf.Signer}
-	version, config, err := fetchResourceConfig(cf.EndorserClients[0], ss, channelID)
+	version, config, err := fetchResourceConfig(cf.EndorserClient, ss, channelID)
 	if err != nil {
 		return errors.Wrap(err, "failed probing channel version")
 	}

@@ -347,7 +347,7 @@ func getModPolicies(ccGrp *common.ConfigGroup, update ccUpdate) map[string]strin
 
 func configBasedLifecycleUpdate(ss *sigSupport, cf *ChaincodeCmdFactory, config *common.Config, sendInit sendInitTransaction) error {
 	var env *common.Envelope
-	hash, err := fetchCCID(ss, cf.EndorserClients[0], chaincodeName, chaincodeVersion)
+	hash, err := fetchCCID(ss, cf.EndorserClient, chaincodeName, chaincodeVersion)
 	if err != nil {
 		return err
 	}

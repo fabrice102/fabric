@@ -25,10 +25,6 @@ import (
 	putils "github.com/hyperledger/fabric/protos/utils"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/context"
-	"sync"
-	"github.com/spf13/viper"
-	"math/rand"
-	"time"
 )
 
 // checkSpec to see if chaincode resides within current package capture for language.
@@ -106,7 +102,7 @@ func chaincodeInvokeOrQuery(cmd *cobra.Command, args []string, invoke bool, cf *
 		channelID,
 		invoke,
 		cf.Signer,
-		cf.EndorserClients,
+		cf.EndorserClient,
 		cf.BroadcastClient)
 
 	if err != nil {
@@ -114,9 +110,9 @@ func chaincodeInvokeOrQuery(cmd *cobra.Command, args []string, invoke bool, cf *
 	}
 
 	if invoke {
-		if proposalResp[0].Response.Status >= shim.ERROR {
-			logger.Debugf("ESCC invoke result: %v", proposalResp[0])
-			pRespPayload, err := putils.GetProposalResponsePayload(proposalResp[0].Payload)
+		if proposalResp.Response.Status >= shim.ERROR {
+			logger.Debugf("ESCC invoke result: %v", proposalResp)
+			pRespPayload, err := putils.GetProposalResponsePayload(proposalResp.Payload)
 			if err != nil {
 				return fmt.Errorf("Error while unmarshaling proposal response payload: %s", err)
 			}
@@ -126,8 +122,8 @@ func chaincodeInvokeOrQuery(cmd *cobra.Command, args []string, invoke bool, cf *
 			}
 			logger.Warningf("Endorsement failure during invoke. chaincode result: %v", ca.Response)
 		} else {
-			logger.Debugf("ESCC invoke result: %v", proposalResp[0])
-			pRespPayload, err := putils.GetProposalResponsePayload(proposalResp[0].Payload)
+			logger.Debugf("ESCC invoke result: %v", proposalResp)
+			pRespPayload, err := putils.GetProposalResponsePayload(proposalResp.Payload)
 			if err != nil {
 				return fmt.Errorf("Error while unmarshaling proposal response payload: %s", err)
 			}
@@ -147,12 +143,12 @@ func chaincodeInvokeOrQuery(cmd *cobra.Command, args []string, invoke bool, cf *
 				return fmt.Errorf("Options --raw (-r) and --hex (-x) are not compatible")
 			}
 			fmt.Print("Query Result (Raw): ")
-			os.Stdout.Write(proposalResp[0].Response.Payload)
+			os.Stdout.Write(proposalResp.Response.Payload)
 		} else {
 			if chaincodeQueryHex {
-				fmt.Printf("Query Result: %x\n", proposalResp[0].Response.Payload)
+				fmt.Printf("Query Result: %x\n", proposalResp.Response.Payload)
 			} else {
-				fmt.Printf("Query Result: %s\n", string(proposalResp[0].Response.Payload))
+				fmt.Printf("Query Result: %s\n", string(proposalResp.Response.Payload))
 			}
 		}
 	}
@@ -226,7 +222,7 @@ func checkChaincodeCmdParams(cmd *cobra.Command) error {
 
 // ChaincodeCmdFactory holds the clients used by ChaincodeCmd
 type ChaincodeCmdFactory struct {
-	EndorserClients []pb.EndorserClient
+	EndorserClient  pb.EndorserClient
 	Signer          msp.SigningIdentity
 	BroadcastClient common.BroadcastClient
 }
@@ -234,27 +230,11 @@ type ChaincodeCmdFactory struct {
 // InitCmdFactory init the ChaincodeCmdFactory with default clients
 func InitCmdFactory(isEndorserRequired, isOrdererRequired bool) (*ChaincodeCmdFactory, error) {
 	var err error
-	var endorserClients []pb.EndorserClient
+	var endorserClient pb.EndorserClient
 	if isEndorserRequired {
-		// Check if multiple endorsers are required...
-		if len(chaincodeEndorsers) != 0 {
-			logger.Infof("Multiple endorsers set: [%v]", chaincodeEndorsers)
-			endorsers := strings.Split(chaincodeEndorsers, ",")
-
-			for _, endorser := range endorsers {
-				endorserClient, err := common.GetEndorserClientByEndpointFnc(endorser)
-				if err != nil {
-					return nil, fmt.Errorf("Error getting endorser client %s, %s: %s", chainFuncName, endorser, err)
-				}
-				endorserClients = append(endorserClients, endorserClient)
-			}
-		} else {
-			logger.Infof("Single endorsers set: [%v]", viper.GetString("peer.address"))
-			endorserClient, err := common.GetEndorserClientFnc()
-			if err != nil {
-				return nil, fmt.Errorf("Error getting endorser client %s: %s", chainFuncName, err)
-			}
-			endorserClients = append(endorserClients, endorserClient)
+		endorserClient, err = common.GetEndorserClientFnc()
+		if err != nil {
+			return nil, fmt.Errorf("Error getting endorser client %s: %s", chainFuncName, err)
 		}
 	}
 
@@ -266,7 +246,7 @@ func InitCmdFactory(isEndorserRequired, isOrdererRequired bool) (*ChaincodeCmdFa
 	var broadcastClient common.BroadcastClient
 	if isOrdererRequired {
 		if len(orderingEndpoint) == 0 {
-			orderingEndpoints, err := common.GetOrdererEndpointOfChainFnc(channelID, signer, endorserClients[0])
+			orderingEndpoints, err := common.GetOrdererEndpointOfChainFnc(channelID, signer, endorserClient)
 			if err != nil {
 				return nil, fmt.Errorf("Error getting (%s) orderer endpoint: %s", channelID, err)
 			}
@@ -284,7 +264,7 @@ func InitCmdFactory(isEndorserRequired, isOrdererRequired bool) (*ChaincodeCmdFa
 		}
 	}
 	return &ChaincodeCmdFactory{
-		EndorserClients: endorserClients,
+		EndorserClient:  endorserClient,
 		Signer:          signer,
 		BroadcastClient: broadcastClient,
 	}, nil
@@ -304,9 +284,9 @@ func ChaincodeInvokeOrQuery(
 	cID string,
 	invoke bool,
 	signer msp.SigningIdentity,
-	endorserClients []pb.EndorserClient,
+	endorserClient pb.EndorserClient,
 	bc common.BroadcastClient,
-) ([]*pb.ProposalResponse, error) {
+) (*pb.ProposalResponse, error) {
 	// Build the ChaincodeInvocationSpec message
 	invocation := &pb.ChaincodeInvocationSpec{ChaincodeSpec: spec}
 	if customIDGenAlg != common.UndefinedParamValue {
@@ -343,56 +323,29 @@ func ChaincodeInvokeOrQuery(
 		return nil, fmt.Errorf("Error creating signed proposal  %s: %s", funcName, err)
 	}
 
-	var responseMtx sync.Mutex
-	var proposalResponses []*pb.ProposalResponse
-	var proposalResponseErrs []error
-	var wg sync.WaitGroup
-
-	rand.Seed(time.Now().UnixNano())
-	for _, endorserClient := range endorserClients {
-		wg.Add(1)
-		go func(endorserClient pb.EndorserClient) {
-			defer wg.Done()
-			time.Sleep(time.Duration(rand.Int31n(500)) * time.Millisecond )
-			proposalResp, err := endorserClient.ProcessProposal(context.Background(), signedProp)
-			if err != nil {
-				responseMtx.Lock()
-				proposalResponseErrs = append(proposalResponseErrs, err)
-				responseMtx.Unlock()
-				return
-			}
-
-			responseMtx.Lock()
-			proposalResponses = append(proposalResponses, proposalResp)
-			responseMtx.Unlock()
-		}(endorserClient)
-	}
-	wg.Wait()
-
-	if len(proposalResponseErrs) != 0 {
-		return nil, fmt.Errorf("Error endorsing %s: %s", funcName, proposalResponseErrs[0])
+	var proposalResp *pb.ProposalResponse
+	proposalResp, err = endorserClient.ProcessProposal(context.Background(), signedProp)
+	if err != nil {
+		return nil, fmt.Errorf("Error endorsing %s: %s", funcName, err)
 	}
 
 	if invoke {
-		if len(proposalResponses) != 0 {
-			for _, resp := range proposalResponses {
-				if resp.Response.Status >= shim.ERROR {
-					return proposalResponses, nil
-				}
+		if proposalResp != nil {
+			if proposalResp.Response.Status >= shim.ERROR {
+				return proposalResp, nil
 			}
-
 			// assemble a signed transaction (it's an Envelope message)
-			env, err := putils.CreateSignedTx(prop, signer, proposalResponses...)
+			env, err := putils.CreateSignedTx(prop, signer, proposalResp)
 			if err != nil {
-				return proposalResponses, fmt.Errorf("Could not assemble transaction, err %s", err)
+				return proposalResp, fmt.Errorf("Could not assemble transaction, err %s", err)
 			}
 
 			// send the envelope for ordering
 			if err = bc.Send(env); err != nil {
-				return proposalResponses, fmt.Errorf("Error sending transaction %s: %s", funcName, err)
+				return proposalResp, fmt.Errorf("Error sending transaction %s: %s", funcName, err)
 			}
 		}
 	}
 
-	return proposalResponses, nil
+	return proposalResp, nil
 }

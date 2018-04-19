@@ -116,7 +116,7 @@ func TestInstallFromPackage(t *testing.T) {
 
 	mockEndorserClient := common.GetMockEndorserClient(mockResponse, nil)
 
-	mockCF.EndorserClients = []pb.EndorserClient{mockEndorserClient}
+	mockCF.EndorserClient = mockEndorserClient
 
 	args := []string{ccpackfile}
 	cmd.SetArgs(args)
@@ -150,7 +150,7 @@ func TestInstallFromBadPackage(t *testing.T) {
 
 	mockEndorserClient := common.GetMockEndorserClient(mockResponse, nil)
 
-	mockCF.EndorserClients = []pb.EndorserClient{mockEndorserClient}
+	mockCF.EndorserClient = mockEndorserClient
 
 	args := []string{ccpackfile}
 	cmd.SetArgs(args)
@@ -174,8 +174,8 @@ func installEx02() error {
 	mockEndorerClient := common.GetMockEndorserClient(mockResponse, nil)
 
 	mockCF := &ChaincodeCmdFactory{
-		EndorserClients: []pb.EndorserClient{mockEndorerClient},
-		Signer:          signer,
+		EndorserClient: mockEndorerClient,
+		Signer:         signer,
 	}
 
 	cmd := installCmd(mockCF)

@@ -40,7 +40,6 @@ func invokeCmd(cf *ChaincodeCmdFactory) *cobra.Command {
 		"name",
 		"ctor",
 		"channelID",
-		"endorsers",
 	}
 	attachFlags(chaincodeInvokeCmd, flagList)
 

@@ -69,7 +69,7 @@ func TestInvokeCmd(t *testing.T) {
 		common.GetDefaultSignerFnc = getDefaultSigner
 	}()
 	common.GetEndorserClientFnc = func() (pb.EndorserClient, error) {
-		return mockCF.EndorserClients[0], nil
+		return mockCF.EndorserClient, nil
 	}
 	common.GetOrdererEndpointOfChainFnc = func(chainID string, signer msp.SigningIdentity, endorserClient pb.EndorserClient) ([]string, error) {
 		return []string{}, nil
@@ -92,7 +92,7 @@ func TestInvokeCmd(t *testing.T) {
 	// Error case 3: getDefaultSignerFnc returns error
 	t.Logf("Start error case 3: getDefaultSignerFnc returns error")
 	common.GetEndorserClientFnc = func() (pb.EndorserClient, error) {
-		return mockCF.EndorserClients[0], nil
+		return mockCF.EndorserClient, nil
 	}
 	common.GetDefaultSignerFnc = func() (msp.SigningIdentity, error) {
 		return nil, errors.New("error")
@@ -104,7 +104,7 @@ func TestInvokeCmd(t *testing.T) {
 	// Error case 4: getOrdererEndpointOfChainFnc returns error
 	t.Logf("Start error case 4: getOrdererEndpointOfChainFnc returns error")
 	common.GetEndorserClientFnc = func() (pb.EndorserClient, error) {
-		return mockCF.EndorserClients[0], nil
+		return mockCF.EndorserClient, nil
 	}
 	common.GetOrdererEndpointOfChainFnc = func(chainID string, signer msp.SigningIdentity, endorserClient pb.EndorserClient) ([]string, error) {
 		return nil, errors.New("error")
@@ -203,7 +203,7 @@ func getMockChaincodeCmdFactoryWithEnorserResponses(responses ...common.MockResp
 	mockEndorserClient := common.GetMockMultiEndorserClient(responses...)
 	mockBroadcastClient := common.GetMockBroadcastClient(nil)
 	mockCF := &ChaincodeCmdFactory{
-		EndorserClients: []pb.EndorserClient{mockEndorserClient},
+		EndorserClient:  mockEndorserClient,
 		Signer:          signer,
 		BroadcastClient: mockBroadcastClient,
 	}
@@ -236,7 +236,7 @@ func getMockChaincodeCmdFactoryEndorsementFailure(ccRespStatus int32, ccRespPayl
 	mockEndorserClient := common.GetMockEndorserClient(mockRespFailure, nil)
 	mockBroadcastClient := common.GetMockBroadcastClient(nil)
 	mockCF := &ChaincodeCmdFactory{
-		EndorserClients: []pb.EndorserClient{mockEndorserClient},
+		EndorserClient:  mockEndorserClient,
 		Signer:          signer,
 		BroadcastClient: mockBroadcastClient,
 	}

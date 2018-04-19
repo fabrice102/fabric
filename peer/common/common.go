@@ -50,10 +50,6 @@ var (
 	// by default it is set to GetEndorserClient function
 	GetEndorserClientFnc func() (pb.EndorserClient, error)
 
-	// GetEndorserClientByEndpointFnc is a function that returns a new endorser client connection for the passed endpoint,
-	// by default it is set to GetEndorserClient function
-	GetEndorserClientByEndpointFnc func(endpoint string) (pb.EndorserClient, error)
-
 	// GetDefaultSignerFnc is a function that returns a default Signer(Default/PERR)
 	// by default it is set to GetDefaultSigner function
 	GetDefaultSignerFnc func() (msp.SigningIdentity, error)
@@ -71,7 +67,6 @@ var (
 
 func init() {
 	GetEndorserClientFnc = GetEndorserClient
-	GetEndorserClientByEndpointFnc = GetEndorserClientByEndpoint
 	GetDefaultSignerFnc = GetDefaultSigner
 	GetBroadcastClientFnc = GetBroadcastClient
 	GetOrdererEndpointOfChainFnc = GetOrdererEndpointOfChain
@@ -127,16 +122,6 @@ func GetEndorserClient() (pb.EndorserClient, error) {
 	clientConn, err := peer.NewPeerClientConnection()
 	if err != nil {
 		return nil, errors.WithMessage(err, "error trying to connect to local peer")
-	}
-	endorserClient := pb.NewEndorserClient(clientConn)
-	return endorserClient, nil
-}
-
-// GetEndorserClientByEndpoint returns a new endorser client connection for the passed endpoint
-func GetEndorserClientByEndpoint(endpoint string) (pb.EndorserClient, error) {
-	clientConn, err := peer.NewPeerClientConnectionWithAddress(endpoint)
-	if err != nil {
-		return nil, errors.WithMessage(err, fmt.Sprintf("error trying to connect to [%s]", endpoint))
 	}
 	endorserClient := pb.NewEndorserClient(clientConn)
 	return endorserClient, nil

@@ -112,7 +112,7 @@ func TestGetEndorserClient(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "Should not return EndorserClients, there is no peer running",
+			name:    "Should not return EndorserClient, there is no peer running",
 			want:    nil,
 			wantErr: true,
 		},
