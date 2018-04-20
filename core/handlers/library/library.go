@@ -7,15 +7,14 @@ SPDX-License-Identifier: Apache-2.0
 package library
 
 import (
+	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/handlers/auth"
 	"github.com/hyperledger/fabric/core/handlers/auth/filter"
 	"github.com/hyperledger/fabric/core/handlers/decoration"
 	"github.com/hyperledger/fabric/core/handlers/decoration/decorator"
-	"github.com/hyperledger/fabric/common/flogging"
 )
 
 var decoratorLogger = flogging.MustGetLogger("decorator")
-
 
 // HandlerLibrary is used to assert
 // how to create the various handlers

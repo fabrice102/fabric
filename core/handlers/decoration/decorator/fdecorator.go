@@ -10,7 +10,7 @@ import (
 
 var decoratorLogger = flogging.MustGetLogger("decorator")
 
-// NewDecorator creates a new decorator
+// NewFDecorator creates a new decorator
 func NewFDecorator() decoration.Decorator {
 	// Load decoration.yaml
 
@@ -24,7 +24,7 @@ func NewFDecorator() decoration.Decorator {
 
 	v.SetConfigType("yaml")
 	err = v.ReadInConfig() // Find and read the config file
-	if err != nil {             // Handle errors reading the config file
+	if err != nil {        // Handle errors reading the config file
 		decoratorLogger.Infof("fatal error when reading %s config : %s\n", "decoration", err)
 	}
 

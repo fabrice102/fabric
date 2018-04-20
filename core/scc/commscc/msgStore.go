@@ -2,6 +2,7 @@ package commscc
 
 import (
 	"sync"
+
 	"github.com/hyperledger/fabric/protos/gossip"
 )
 
