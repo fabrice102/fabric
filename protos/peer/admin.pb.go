@@ -49,9 +49,11 @@ It has these top-level messages:
 	Unregister
 	FilteredBlock
 	FilteredTransaction
-	FilteredAction
+	FilteredTransactionActions
+	FilteredChaincodeAction
 	SignedEvent
 	Event
+	DeliverResponse
 	PeerID
 	PeerEndpoint
 	SignedProposal

@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"fmt"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/bccsp"
@@ -158,17 +159,6 @@ func (msp *bccspmsp) setupCAs(conf *m.FabricMSPConfig) error {
 		msp.opts.Intermediates.AddCert(id.(*identity).cert)
 	}
 
-	// make and fill the set of admin certs (if present)
-	msp.admins = make([]Identity, len(conf.Admins))
-	for i, admCert := range conf.Admins {
-		id, _, err := msp.getIdentityFromConf(admCert)
-		if err != nil {
-			return err
-		}
-
-		msp.admins[i] = id
-	}
-
 	return nil
 }
 
@@ -262,15 +252,6 @@ func (msp *bccspmsp) setupNodeOUs(config *m.FabricMSPConfig) error {
 			msp.peerOU.CertifiersIdentifier = certifiersIdentifier
 		}
 
-		// OrdererOU
-		msp.ordererOU = &OUIdentifier{OrganizationalUnitIdentifier: config.FabricNodeOUs.OrdererOUIdentifier.OrganizationalUnitIdentifier}
-		if len(config.FabricNodeOUs.OrdererOUIdentifier.Certificate) != 0 {
-			certifiersIdentifier, err := msp.getCertifiersIdentifier(config.FabricNodeOUs.OrdererOUIdentifier.Certificate)
-			if err != nil {
-				return err
-			}
-			msp.ordererOU.CertifiersIdentifier = certifiersIdentifier
-		}
 	} else {
 		msp.ouEnforcement = false
 	}
@@ -283,6 +264,16 @@ func (msp *bccspmsp) setupSigningIdentity(conf *m.FabricMSPConfig) error {
 		sid, err := msp.getSigningIdentityFromConf(conf.SigningIdentity)
 		if err != nil {
 			return err
+		}
+
+		expirationTime := sid.ExpiresAt()
+		now := time.Now()
+		if expirationTime.After(now) {
+			mspLogger.Debug("Signing identity expires at", expirationTime)
+		} else if expirationTime.IsZero() {
+			mspLogger.Debug("Signing identity has no known expiration time")
+		} else {
+			return errors.Errorf("signing identity expired %v ago", now.Sub(expirationTime))
 		}
 
 		msp.signer = sid

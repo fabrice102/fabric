@@ -41,8 +41,6 @@ type NodeOUs struct {
 	ClientOUIdentifier *OrganizationalUnitIdentifiersConfiguration `yaml:"ClientOUIdentifier,omitempty"`
 	// PeerOUIdentifier specifies how to recognize peers by OU
 	PeerOUIdentifier *OrganizationalUnitIdentifiersConfiguration `yaml:"PeerOUIdentifier,omitempty"`
-	// OrdererOUIdentifier specifies how to recognize orderers by OU
-	OrdererOUIdentifier *OrganizationalUnitIdentifiersConfiguration `yaml:"OrdererOUIdentifier,omitempty"`
 }
 
 // Configuration represents the accessory configuration an MSP can be equipped with.
@@ -90,15 +88,21 @@ func getPemMaterialFromDir(dir string) ([][]byte, error) {
 	content := make([][]byte, 0)
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
-		return nil, errors.Wrapf(err, "could not read directory %s", err)
+		return nil, errors.Wrapf(err, "could not read directory %s", dir)
 	}
 
 	for _, f := range files {
+		fullName := filepath.Join(dir, f.Name())
+
+		f, err := os.Stat(fullName)
+		if err != nil {
+			mspLogger.Warningf("Failed to stat %s: %s", fullName, err)
+			continue
+		}
 		if f.IsDir() {
 			continue
 		}
 
-		fullName := filepath.Join(dir, string(filepath.Separator), f.Name())
 		mspLogger.Debugf("Inspecting file %s", fullName)
 
 		item, err := readPemFile(fullName)
@@ -144,6 +148,20 @@ func SetupBCCSPKeystoreConfig(bccspConfig *factory.FactoryOpts, keystoreDir stri
 	}
 
 	return bccspConfig
+}
+
+// GetLocalMspConfigWithType returns a local MSP
+// configuration for the MSP in the specified
+// directory, with the specified ID and type
+func GetLocalMspConfigWithType(dir string, bccspConfig *factory.FactoryOpts, ID, mspType string) (*msp.MSPConfig, error) {
+	switch mspType {
+	case ProviderTypeToString(FABRIC):
+		return GetLocalMspConfig(dir, bccspConfig, ID)
+	case ProviderTypeToString(IDEMIX):
+		return GetIdemixMspConfig(dir, ID)
+	default:
+		return nil, errors.Errorf("unknown MSP type '%s'", mspType)
+	}
 }
 
 func GetLocalMspConfig(dir string, bccspConfig *factory.FactoryOpts, ID string) (*msp.MSPConfig, error) {
@@ -280,15 +298,11 @@ func getMspConfig(dir string, ID string, sigid *msp.SigningIdentityInfo) (*msp.M
 			if configuration.NodeOUs.PeerOUIdentifier == nil || len(configuration.NodeOUs.PeerOUIdentifier.OrganizationalUnitIdentifier) == 0 {
 				return nil, errors.New("Failed loading NodeOUs. PeerOU must be different from nil.")
 			}
-			if configuration.NodeOUs.OrdererOUIdentifier == nil || len(configuration.NodeOUs.OrdererOUIdentifier.OrganizationalUnitIdentifier) == 0 {
-				return nil, errors.New("Failed loading NodeOUs. OrdererOU must be different from nil.")
-			}
 
 			nodeOUs = &msp.FabricNodeOUs{
-				Enable:              configuration.NodeOUs.Enable,
-				ClientOUIdentifier:  &msp.FabricOUIdentifier{OrganizationalUnitIdentifier: configuration.NodeOUs.ClientOUIdentifier.OrganizationalUnitIdentifier},
-				PeerOUIdentifier:    &msp.FabricOUIdentifier{OrganizationalUnitIdentifier: configuration.NodeOUs.PeerOUIdentifier.OrganizationalUnitIdentifier},
-				OrdererOUIdentifier: &msp.FabricOUIdentifier{OrganizationalUnitIdentifier: configuration.NodeOUs.OrdererOUIdentifier.OrganizationalUnitIdentifier},
+				Enable:             configuration.NodeOUs.Enable,
+				ClientOUIdentifier: &msp.FabricOUIdentifier{OrganizationalUnitIdentifier: configuration.NodeOUs.ClientOUIdentifier.OrganizationalUnitIdentifier},
+				PeerOUIdentifier:   &msp.FabricOUIdentifier{OrganizationalUnitIdentifier: configuration.NodeOUs.PeerOUIdentifier.OrganizationalUnitIdentifier},
 			}
 
 			// Read certificates, if defined
@@ -309,15 +323,6 @@ func getMspConfig(dir string, ID string, sigid *msp.SigningIdentityInfo) (*msp.M
 				mspLogger.Debugf("Failed loading PeerOU certificate at [%s]: [%s]", f, err)
 			} else {
 				nodeOUs.PeerOUIdentifier.Certificate = raw
-			}
-
-			// OrdererOU
-			f = filepath.Join(dir, configuration.NodeOUs.OrdererOUIdentifier.Certificate)
-			raw, err = readFile(f)
-			if err != nil {
-				mspLogger.Debugf("Failed loading OrdererOU certificate at [%s]: [%s]", f, err)
-			} else {
-				nodeOUs.OrdererOUIdentifier.Certificate = raw
 			}
 		}
 	} else {

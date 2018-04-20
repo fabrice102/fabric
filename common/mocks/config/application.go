@@ -23,7 +23,9 @@ func (m *MockApplication) Capabilities() channelconfig.ApplicationCapabilities {
 type MockApplicationCapabilities struct {
 	SupportedRv                  error
 	ForbidDuplicateTXIdInBlockRv bool
-	LifecycleViaConfigRv         bool
+	ResourcesTreeRv              bool
+	PrivateChannelDataRv         bool
+	V1_1ValidationRv             bool
 }
 
 func (mac *MockApplicationCapabilities) Supported() error {
@@ -34,6 +36,14 @@ func (mac *MockApplicationCapabilities) ForbidDuplicateTXIdInBlock() bool {
 	return mac.ForbidDuplicateTXIdInBlockRv
 }
 
-func (mac *MockApplicationCapabilities) LifecycleViaConfig() bool {
-	return mac.LifecycleViaConfigRv
+func (mac *MockApplicationCapabilities) ResourcesTree() bool {
+	return mac.ResourcesTreeRv
+}
+
+func (mac *MockApplicationCapabilities) PrivateChannelData() bool {
+	return mac.PrivateChannelDataRv
+}
+
+func (mac *MockApplicationCapabilities) V1_1Validation() bool {
+	return mac.V1_1ValidationRv
 }

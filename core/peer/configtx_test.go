@@ -193,7 +193,7 @@ func (h *testHelper) sampleResourceConfig(version uint64, entries ...string) *co
 		ChannelGroup: &common.ConfigGroup{
 			Version: version,
 			Groups: map[string]*common.ConfigGroup{
-				resourcesconfig.ChaincodesGroupKey: &common.ConfigGroup{
+				resourcesconfig.ChaincodesGroupKey: {
 					Groups:    ccGroups,
 					ModPolicy: modPolicy,
 				},
@@ -209,6 +209,7 @@ func (h *testHelper) sampleChannelConfig(sequence uint64, enableV11Capability bo
 		profile.Orderer.Capabilities[capabilities.ApplicationV1_1] = true
 		profile.Application.Capabilities = make(map[string]bool)
 		profile.Application.Capabilities[capabilities.ApplicationV1_1] = true
+		profile.Application.Capabilities[capabilities.ApplicationResourcesTreeExperimental] = true
 	}
 	channelGroup, _ := encoder.NewChannelGroup(profile)
 	return &common.Config{
@@ -271,7 +272,7 @@ func (h *testHelper) constructResourceBundle(chainid string, ledger ledger.PeerL
 	appConfig, capabilityOn := chanConfigBundle.ApplicationConfig()
 
 	resConf := &common.Config{ChannelGroup: &common.ConfigGroup{}}
-	if capabilityOn && appConfig.Capabilities().LifecycleViaConfig() {
+	if capabilityOn && appConfig.Capabilities().ResourcesTree() {
 		resConf, err = retrievePersistedResourceConfig(ledger)
 		if err != nil {
 			return nil, err
@@ -294,7 +295,7 @@ func (h *testHelper) computeDeltaResConfTx(t *testing.T, chainid string, source,
 	sigHeader, err := localmsp.NewSigner().NewSignatureHeader()
 	assert.NoError(t, err)
 
-	confUpdateEnv.Signatures = []*common.ConfigSignature{&common.ConfigSignature{
+	confUpdateEnv.Signatures = []*common.ConfigSignature{{
 		SignatureHeader: utils.MarshalOrPanic(sigHeader)}}
 
 	sigs, err := localmsp.NewSigner().Sign(util.ConcatenateBytes(confUpdateEnv.Signatures[0].SignatureHeader, confUpdateEnv.ConfigUpdate))
@@ -308,9 +309,13 @@ func (h *testHelper) computeDeltaResConfTx(t *testing.T, chainid string, source,
 
 func (h *testHelper) initLocalMSP() {
 	rand.Seed(time.Now().UnixNano())
-	conf := config.Load()
+	conf, err := config.Load()
+	if err != nil {
+		panic(fmt.Errorf("failed to load config: %s", err))
+	}
+
 	// Load local MSP
-	err := mspmgmt.LoadLocalMsp(conf.General.LocalMSPDir, conf.General.BCCSP, conf.General.LocalMSPID)
+	err = mspmgmt.LoadLocalMsp(conf.General.LocalMSPDir, conf.General.BCCSP, conf.General.LocalMSPID)
 	if err != nil {
 		panic(fmt.Errorf("Failed to initialize local MSP: %s", err))
 	}

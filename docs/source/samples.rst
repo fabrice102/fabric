@@ -27,6 +27,11 @@ execute the following commands:
 
   git clone -b master https://github.com/hyperledger/fabric-samples.git
   cd fabric-samples
+  git checkout {TAG}　
+
+.. note:: To ensure the samples are compatible with the version of Fabric binaries you download below,
+          checkout the samples ``{TAG}`` that matches your Fabric version, for example, v1.1.0.
+          To see a list of all fabric-samples tags, use command "git tag".
 
 .. _binaries:
 
@@ -44,28 +49,33 @@ you will extract the platform-specific binaries:
 
 .. code:: bash
 
-  curl -sSL https://goo.gl/6wtTN5 | bash -s 1.1.0-preview
+  curl -sSL https://goo.gl/6wtTN5 | bash -s 1.1.0
 
 .. note:: If you get an error running the above curl command, you may
-          have too old a version of curl that does not handle redirects.
-					Please visit the :doc:`prereqs` page for additional information on
-					where to find the latest version. Alternately, you can substitute the
-					un-shortened URL:
-					  https://github.com/hyperledger/fabric/blob/master/scripts/bootstrap.sh
+          have too old a version of curl that does not handle
+          redirects or an unsupported environment.
+
+	  Please visit the :doc:`prereqs` page for additional
+	  information on where to find the latest version of curl and
+	  get the right environment. Alternately, you can substitute
+	  the un-shortened URL:
+	  https://github.com/hyperledger/fabric/blob/master/scripts/bootstrap.sh
 
 .. note:: You can use the command above for any published version of Hyperledger
-          Fabric. Simply replace '1.1.0-preview' with the version identifier
-					of the version you wish to install.
+          Fabric. Simply replace '1.1.0' with the version identifier
+          of the version you wish to install.
 
-The curl command above downloads and executes a bash script
+The command above downloads and executes a bash script
 that will download and extract all of the platform-specific binaries you
 will need to set up your network and place them into the cloned repo you
 created above. It retrieves four platform-specific binaries:
 
   * ``cryptogen``,
   * ``configtxgen``,
-  * ``configtxlator``, and
+  * ``configtxlator``,
   * ``peer``
+  * ``orderer`` and
+  * ``fabric-ca-client``
 
 and places them in the ``bin`` sub-directory of the current working
 directory.

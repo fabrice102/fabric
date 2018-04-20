@@ -12,8 +12,6 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/hyperledger/fabric/core/ledger/customtx"
-
 	"github.com/hyperledger/fabric/common/channelconfig"
 	cc "github.com/hyperledger/fabric/common/config"
 	"github.com/hyperledger/fabric/common/configtx"
@@ -33,6 +31,7 @@ import (
 	"github.com/hyperledger/fabric/core/committer/txvalidator"
 	"github.com/hyperledger/fabric/core/common/privdata"
 	"github.com/hyperledger/fabric/core/ledger"
+	"github.com/hyperledger/fabric/core/ledger/customtx"
 	"github.com/hyperledger/fabric/core/ledger/ledgermgmt"
 	"github.com/hyperledger/fabric/core/transientstore"
 	"github.com/hyperledger/fabric/gossip/api"
@@ -45,7 +44,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/semaphore"
-	"google.golang.org/grpc"
 )
 
 var peerLogger = flogging.MustGetLogger("peer")
@@ -148,7 +146,8 @@ func (cs *chainSupport) GetMSPIDs(cid string) []string {
 
 // Sequence passes through to the underlying configtx.Validator
 func (cs *chainSupport) Sequence() uint64 {
-	return cs.ConfigtxValidator().Sequence()
+	sb := cs.bundleSource.StableBundle()
+	return sb.ConfigtxValidator().Sequence() + sb.ChannelConfig().ConfigtxValidator().Sequence()
 }
 func (cs *chainSupport) Reader() blockledger.Reader {
 	return cs.fileLedger
@@ -277,9 +276,25 @@ func createChain(cid string, ledger ledger.PeerLedger, cb *common.Block) error {
 		return err
 	}
 
-	bundle, err := channelconfig.NewBundle(cid, chanConf)
-	if err != nil {
-		return err
+	var bundle *channelconfig.Bundle
+
+	if chanConf != nil {
+		bundle, err = channelconfig.NewBundle(cid, chanConf)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Config was only stored in the statedb starting with v1.1 binaries
+		// so if the config is not found there, extract it manually from the config block
+		envelopeConfig, err := utils.ExtractEnvelope(cb, 0)
+		if err != nil {
+			return err
+		}
+
+		bundle, err = channelconfig.NewBundleFromEnvelope(envelopeConfig)
+		if err != nil {
+			return err
+		}
 	}
 
 	capabilitiesSupportedOrPanic(bundle)
@@ -337,12 +352,22 @@ func createChain(cid string, ledger ledger.PeerLedger, cb *common.Block) error {
 	}
 
 	resConf := &common.Config{ChannelGroup: &common.ConfigGroup{}}
-	if ac != nil && ac.Capabilities().LifecycleViaConfig() {
-		if resConf, err = retrievePersistedResourceConfig(ledger); err != nil {
+	if ac != nil && ac.Capabilities().ResourcesTree() {
+		iResConf, err := retrievePersistedResourceConfig(ledger)
+
+		if err != nil {
 			return err
 		}
+
+		if iResConf != nil {
+			resConf = iResConf
+		}
 	}
+
 	rBundle, err := resourcesconfig.NewBundle(cid, resConf, bundle)
+	if err != nil {
+		return err
+	}
 
 	cs.bundleSource = resourcesconfig.NewBundleSource(
 		rBundle,
@@ -376,11 +401,14 @@ func createChain(cid string, ledger ledger.PeerLedger, cb *common.Block) error {
 	if err != nil {
 		return errors.Wrapf(err, "Failed opening transient store for %s", bundle.ConfigtxValidator().ChainID())
 	}
+	simpleCollectionStore := privdata.NewSimpleCollectionStore(&collectionSupport{
+		PeerLedger: ledger,
+	})
 	service.GetGossipService().InitializeChannel(bundle.ConfigtxValidator().ChainID(), ordererAddresses, service.Support{
 		Validator: validator,
 		Committer: c,
 		Store:     store,
-		Cs:        &privdata.NopCollectionStore{},
+		Cs:        simpleCollectionStore,
 	})
 
 	chains.Lock()
@@ -643,11 +671,6 @@ func SetCurrConfigBlock(block *common.Block, cid string) error {
 	return fmt.Errorf("Chain %s doesn't exist on the peer", cid)
 }
 
-// NewPeerClientConnection Returns a new grpc.ClientConn to the configured local PEER.
-func NewPeerClientConnection() (*grpc.ClientConn, error) {
-	return NewPeerClientConnectionWithAddress(viper.GetString("peer.address"))
-}
-
 // GetLocalIP returns the non loopback local IP of the host
 func GetLocalIP() string {
 	addrs, err := net.InterfaceAddrs()
@@ -663,16 +686,6 @@ func GetLocalIP() string {
 		}
 	}
 	return ""
-}
-
-// NewPeerClientConnectionWithAddress Returns a new grpc.ClientConn to the configured local PEER.
-func NewPeerClientConnectionWithAddress(peerAddress string) (*grpc.ClientConn, error) {
-	if comm.TLSEnabled() {
-		return comm.NewClientConnectionWithAddress(peerAddress, true, true,
-			comm.InitTLSForPeer(), nil)
-	}
-	return comm.NewClientConnectionWithAddress(peerAddress, true, false,
-		nil, nil)
 }
 
 // GetChannelsInfo returns an array with information about all channels for
@@ -722,6 +735,22 @@ func CreatePeerServer(listenAddress string,
 // GetPeerServer returns the peer server instance
 func GetPeerServer() comm.GRPCServer {
 	return peerServer
+}
+
+type collectionSupport struct {
+	ledger.PeerLedger
+}
+
+func (cs *collectionSupport) GetQueryExecutorForLedger(cid string) (ledger.QueryExecutor, error) {
+	return cs.NewQueryExecutor()
+}
+
+func (*collectionSupport) GetCollectionKVSKey(cc common.CollectionCriteria) string {
+	return privdata.BuildCollectionKVSKey(cc.Namespace)
+}
+
+func (*collectionSupport) GetIdentityDeserializer(chainID string) msp.IdentityDeserializer {
+	return mspmgmt.GetManagerForChain(chainID)
 }
 
 //

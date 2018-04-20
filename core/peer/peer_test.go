@@ -121,7 +121,7 @@ func TestCreateChainFromBlock(t *testing.T) {
 		return dialOpts
 	}
 	err = service.InitGossipServiceCustomDeliveryFactory(
-		identity, "localhost:13611", grpcServer,
+		identity, "localhost:13611", grpcServer, nil,
 		&mockDeliveryClientFactory{},
 		messageCryptoService, secAdv, defaultSecureDialOpts)
 
@@ -200,12 +200,6 @@ func TestCreateChainFromBlock(t *testing.T) {
 	channels := GetChannelsInfo()
 	if len(channels) != 1 {
 		t.Fatalf("incorrect number of channels")
-	}
-}
-
-func TestNewPeerClientConnection(t *testing.T) {
-	if _, err := NewPeerClientConnection(); err != nil {
-		t.Log(err)
 	}
 }
 

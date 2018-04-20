@@ -16,21 +16,25 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric/common/mocks/config"
 	mscc "github.com/hyperledger/fabric/common/mocks/scc"
 	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/core/aclmgmt"
 	"github.com/hyperledger/fabric/core/aclmgmt/mocks"
+	"github.com/hyperledger/fabric/core/aclmgmt/resources"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/core/common/ccprovider"
 	"github.com/hyperledger/fabric/core/common/sysccprovider"
 	cutil "github.com/hyperledger/fabric/core/container/util"
+	"github.com/hyperledger/fabric/core/ledger/cceventmgmt"
 	"github.com/hyperledger/fabric/core/mocks/scc/lscc"
 	"github.com/hyperledger/fabric/core/policy"
 	policymocks "github.com/hyperledger/fabric/core/policy/mocks"
 	"github.com/hyperledger/fabric/msp"
 	mspmgmt "github.com/hyperledger/fabric/msp/mgmt"
 	"github.com/hyperledger/fabric/msp/mgmt/testtools"
+	"github.com/hyperledger/fabric/protos/common"
 	pb "github.com/hyperledger/fabric/protos/peer"
 	"github.com/hyperledger/fabric/protos/utils"
 	putils "github.com/hyperledger/fabric/protos/utils"
@@ -38,7 +42,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func constructDeploymentSpec(name string, path string, version string, initArgs [][]byte, createFS bool, scc *lifeCycleSysCC) (*pb.ChaincodeDeploymentSpec, error) {
+func constructDeploymentSpec(name string, path string, version string, initArgs [][]byte, createInvalidIndex bool, createFS bool, scc *lifeCycleSysCC) (*pb.ChaincodeDeploymentSpec, error) {
 	spec := &pb.ChaincodeSpec{Type: 1, ChaincodeId: &pb.ChaincodeID{Name: name, Path: path, Version: version}, Input: &pb.ChaincodeInput{Args: initArgs}}
 
 	codePackageBytes := bytes.NewBuffer(nil)
@@ -48,6 +52,14 @@ func constructDeploymentSpec(name string, path string, version string, initArgs 
 	err := cutil.WriteBytesToPackage("src/garbage.go", []byte(name+path+version), tw)
 	if err != nil {
 		return nil, err
+	}
+
+	// create an invalid couchdb index definition for negative testing
+	if createInvalidIndex {
+		err = cutil.WriteBytesToPackage("META-INF/statedb/couchdb/indexes/badIndex.json", []byte("invalid index definition"), tw)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	tw.Close()
@@ -67,7 +79,7 @@ func constructDeploymentSpec(name string, path string, version string, initArgs 
 
 		scc.support.(*lscc.MockSupport).GetChaincodeFromLocalStorageRv = cccdspack
 		scc.support.(*lscc.MockSupport).GetChaincodeFromLocalStorageErr = nil
-		scc.support.(*lscc.MockSupport).GetChaincodesFromLocalStorageRv = &pb.ChaincodeQueryResponse{Chaincodes: []*pb.ChaincodeInfo{&pb.ChaincodeInfo{}}}
+		scc.support.(*lscc.MockSupport).GetChaincodesFromLocalStorageRv = &pb.ChaincodeQueryResponse{Chaincodes: []*pb.ChaincodeInfo{{}}}
 		scc.support.(*lscc.MockSupport).GetChaincodesFromLocalStorageErr = nil
 	} else {
 		scc.support.(*lscc.MockSupport).GetChaincodeFromLocalStorageRv = nil
@@ -81,6 +93,11 @@ func constructDeploymentSpec(name string, path string, version string, initArgs 
 
 //TestInstall tests the install function with various inputs
 func TestInstall(t *testing.T) {
+
+	// Initialize cceventmgmt Mgr
+	// TODO cceventmgmt singleton should be refactored out of peer in the future. See CR 16549 for details.
+	cceventmgmt.Initialize()
+
 	scc := &lifeCycleSysCC{support: &lscc.MockSupport{}}
 	stub := shim.NewMockStub("lscc", scc)
 	res := stub.MockInit("1", nil)
@@ -97,19 +114,22 @@ func TestInstall(t *testing.T) {
 
 	path := "github.com/hyperledger/fabric/examples/chaincode/go/chaincode_example02"
 
-	testInstall(t, "example02", "0", path, "", "Alice", scc, stub)
-	testInstall(t, "example02-2", "1.0", path, "", "Alice", scc, stub)
-	testInstall(t, "example02.go", "0", path, InvalidChaincodeNameErr("example02.go").Error(), "Alice", scc, stub)
-	testInstall(t, "", "0", path, EmptyChaincodeNameErr("").Error(), "Alice", scc, stub)
-	testInstall(t, "example02", "1{}0", path, InvalidVersionErr("1{}0").Error(), "Alice", scc, stub)
-	testInstall(t, "example02", "0", path, "Authorization for INSTALL has been denied", "Bob", scc, stub)
+	testInstall(t, "example02", "0", path, false, "", "Alice", scc, stub)
+	testInstall(t, "example02-2", "1.0", path, false, "", "Alice", scc, stub)
+	testInstall(t, "example02.go", "0", path, false, InvalidChaincodeNameErr("example02.go").Error(), "Alice", scc, stub)
+	testInstall(t, "", "0", path, false, EmptyChaincodeNameErr("").Error(), "Alice", scc, stub)
+	testInstall(t, "example02", "1{}0", path, false, InvalidVersionErr("1{}0").Error(), "Alice", scc, stub)
+	testInstall(t, "example02", "0", path, true, InvalidStatedbArtifactsErr("").Error(), "Alice", scc, stub)
+	testInstall(t, "example02", "0", path, false, "Authorization for INSTALL has been denied", "Bob", scc, stub)
+	testInstall(t, "example02-2", "1.0-alpha+001", path, false, "", "Alice", scc, stub)
+	testInstall(t, "example02-2", "1.0+sha.c0ffee", path, false, "", "Alice", scc, stub)
 
 	scc.support.(*lscc.MockSupport).PutChaincodeToLocalStorageErr = errors.New("barf")
 
-	testInstall(t, "example02", "0", path, "barf", "Alice", scc, stub)
+	testInstall(t, "example02", "0", path, false, "barf", "Alice", scc, stub)
 }
 
-func testInstall(t *testing.T, ccname string, version string, path string, expectedErrorMsg string, caller string, scc *lifeCycleSysCC, stub *shim.MockStub) {
+func testInstall(t *testing.T, ccname string, version string, path string, createInvalidIndex bool, expectedErrorMsg string, caller string, scc *lifeCycleSysCC, stub *shim.MockStub) {
 	identityDeserializer := &policymocks.MockIdentityDeserializer{[]byte("Alice"), []byte("msg1")}
 	policyManagerGetter := &policymocks.MockChannelPolicyManagerGetter{
 		Managers: map[string]policies.Manager{
@@ -122,7 +142,7 @@ func testInstall(t *testing.T, ccname string, version string, path string, expec
 		&policymocks.MockMSPPrincipalGetter{Principal: []byte("Alice")},
 	)
 
-	cds, err := constructDeploymentSpec(ccname, path, version, [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, false, scc)
+	cds, err := constructDeploymentSpec(ccname, path, version, [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, createInvalidIndex, false, scc)
 	assert.NoError(t, err)
 	b := utils.MarshalOrPanic(cds)
 
@@ -147,7 +167,7 @@ func TestDeploy(t *testing.T) {
 
 	testDeploy(t, "example02", "0", path, false, false, true, "", nil, nil)
 	testDeploy(t, "example02", "1.0", path, false, false, true, "", nil, nil)
-	testDeploy(t, "example02", "1.0", path, false, false, false, "cannot get package for chaincode (example02:1.0)-barf", nil, nil)
+	testDeploy(t, "example02", "1.0", path, false, false, false, "cannot get package for chaincode (example02:1.0)", nil, nil)
 	testDeploy(t, "example02", "0", path, true, false, true, EmptyChaincodeNameErr("").Error(), nil, nil)
 	testDeploy(t, "example02", "0", path, false, true, true, EmptyVersionErr("example02").Error(), nil, nil)
 	testDeploy(t, "example02.go", "0", path, false, false, true, InvalidChaincodeNameErr("example02.go").Error(), nil, nil)
@@ -227,7 +247,7 @@ func testDeploy(t *testing.T, ccname string, version string, path string, forceB
 	identityDeserializer.Msg = sProp.ProposalBytes
 	sProp.Signature = sProp.ProposalBytes
 
-	cds, err := constructDeploymentSpec(ccname, path, version, [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, install, scc)
+	cds, err := constructDeploymentSpec(ccname, path, version, [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, false, install, scc)
 	assert.NoError(t, err)
 
 	if forceBlankCCName {
@@ -250,13 +270,13 @@ func testDeploy(t *testing.T, ccname string, version string, path string, forceB
 		assert.Equal(t, res.Status, int32(shim.OK), res.Message)
 
 		mockAclProvider.Reset()
-		mockAclProvider.On("CheckACL", aclmgmt.LSCC_GETCCINFO, "test", sProp).Return(nil)
+		mockAclProvider.On("CheckACL", resources.LSCC_GETCCINFO, "test", sProp).Return(nil)
 		args = [][]byte{[]byte(GETCCINFO), []byte("test"), []byte(cds.ChaincodeSpec.ChaincodeId.Name)}
 		res = stub.MockInvokeWithSignedProposal("1", args, sProp)
 		assert.Equal(t, res.Status, int32(shim.OK), res.Message)
 
 		mockAclProvider.Reset()
-		mockAclProvider.On("CheckACL", aclmgmt.LSCC_GETDEPSPEC, "test", sProp).Return(nil)
+		mockAclProvider.On("CheckACL", resources.LSCC_GETDEPSPEC, "test", sProp).Return(nil)
 		args = [][]byte{[]byte(GETDEPSPEC), []byte("test"), []byte(cds.ChaincodeSpec.ChaincodeId.Name)}
 		res = stub.MockInvokeWithSignedProposal("1", args, sProp)
 		assert.Equal(t, res.Status, int32(shim.OK), res.Message)
@@ -270,7 +290,7 @@ func testDeploy(t *testing.T, ccname string, version string, path string, forceB
 
 		scc.support.(*lscc.MockSupport).GetChaincodeFromLocalStorageRv = nil
 		mockAclProvider.Reset()
-		mockAclProvider.On("CheckACL", aclmgmt.LSCC_GETCCDATA, "test", sProp).Return(nil)
+		mockAclProvider.On("CheckACL", resources.LSCC_GETCCDATA, "test", sProp).Return(nil)
 		args = [][]byte{[]byte(GETCCDATA), []byte("test"), []byte(cds.ChaincodeSpec.ChaincodeId.Name)}
 		res = stub.MockInvokeWithSignedProposal("1", args, sProp)
 		assert.Equal(t, res.Status, int32(shim.OK), res.Message)
@@ -339,7 +359,7 @@ func testUpgrade(t *testing.T, ccname string, version string, newccname string, 
 		scc.support.(*lscc.MockSupport).GetInstantiationPolicyRv = []byte("instantiation policy")
 	}
 
-	cds, err := constructDeploymentSpec(ccname, path, version, [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, true, scc)
+	cds, err := constructDeploymentSpec(ccname, path, version, [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, false, true, scc)
 	assert.NoError(t, err)
 	b := utils.MarshalOrPanic(cds)
 
@@ -354,7 +374,7 @@ func testUpgrade(t *testing.T, ccname string, version string, newccname string, 
 	scc.support.(*lscc.MockSupport).GetInstantiationPolicyErr = saved1
 	scc.support.(*lscc.MockSupport).CheckInstantiationPolicyMap = saved2
 
-	newCds, err := constructDeploymentSpec(newccname, path, newversion, [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, true, scc)
+	newCds, err := constructDeploymentSpec(newccname, path, newversion, [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, false, true, scc)
 	assert.NoError(t, err)
 	newb := utils.MarshalOrPanic(newCds)
 
@@ -401,12 +421,12 @@ func TestGETCCINFO(t *testing.T) {
 	sProp.Signature = sProp.ProposalBytes
 
 	mockAclProvider.Reset()
-	mockAclProvider.On("CheckACL", aclmgmt.LSCC_GETCCINFO, "chain", sProp).Return(errors.New("Failed access control"))
+	mockAclProvider.On("CheckACL", resources.LSCC_GETCCINFO, "chain", sProp).Return(errors.New("Failed access control"))
 	res = stub.MockInvokeWithSignedProposal("1", [][]byte{[]byte(GETCCINFO), []byte("chain"), []byte("chaincode")}, sProp)
 	assert.NotEqual(t, res.Status, int32(shim.OK), res.Message)
 
 	mockAclProvider.Reset()
-	mockAclProvider.On("CheckACL", aclmgmt.LSCC_GETCCINFO, "chain", sProp).Return(nil)
+	mockAclProvider.On("CheckACL", resources.LSCC_GETCCINFO, "chain", sProp).Return(nil)
 	res = stub.MockInvokeWithSignedProposal("1", [][]byte{[]byte(GETCCINFO), []byte("chain"), []byte("nonexistentchaincode")}, sProp)
 	assert.NotEqual(t, res.Status, int32(shim.OK), res.Message)
 }
@@ -484,13 +504,13 @@ func TestGETINSTALLEDCHAINCODES(t *testing.T) {
 	res = stub.MockInvokeWithSignedProposal("1", [][]byte{[]byte(GETINSTALLEDCHAINCODES)}, sProp)
 	assert.NotEqual(t, res.Status, int32(shim.OK), res.Message)
 
-	_, err := constructDeploymentSpec("ccname", "path", "version", [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, false, scc)
+	_, err := constructDeploymentSpec("ccname", "path", "version", [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, false, false, scc)
 	assert.NoError(t, err)
 
 	res = stub.MockInvokeWithSignedProposal("1", [][]byte{[]byte(GETINSTALLEDCHAINCODES)}, sProp)
 	assert.NotEqual(t, res.Status, int32(shim.OK), res.Message)
 
-	_, err = constructDeploymentSpec("ccname", "path", "version", [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, true, scc)
+	_, err = constructDeploymentSpec("ccname", "path", "version", [][]byte{[]byte("init"), []byte("a"), []byte("100"), []byte("b"), []byte("200")}, false, true, scc)
 	assert.NoError(t, err)
 
 	res = stub.MockInvokeWithSignedProposal("1", [][]byte{[]byte(GETINSTALLEDCHAINCODES)}, sProp)
@@ -546,6 +566,45 @@ func TestErrors(t *testing.T) {
 	assert.True(t, len(err3.Error()) > 0)
 }
 
+func TestPutChaincodeCollectionData(t *testing.T) {
+	scc := new(lifeCycleSysCC)
+	stub := shim.NewMockStub("lscc", scc)
+
+	if res := stub.MockInit("1", nil); res.Status != shim.OK {
+		fmt.Println("Init failed", string(res.Message))
+		t.FailNow()
+	}
+
+	err := scc.putChaincodeCollectionData(stub, nil, nil)
+	assert.Error(t, err)
+
+	cd := &ccprovider.ChaincodeData{Name: "foo"}
+
+	err = scc.putChaincodeCollectionData(stub, cd, nil)
+	assert.NoError(t, err)
+
+	cc := &common.CollectionConfig{Payload: &common.CollectionConfig_StaticCollectionConfig{&common.StaticCollectionConfig{Name: "mycollection"}}}
+	ccp := &common.CollectionConfigPackage{[]*common.CollectionConfig{cc}}
+	ccpBytes, err := proto.Marshal(ccp)
+	assert.NoError(t, err)
+	assert.NotNil(t, ccpBytes)
+
+	stub.MockTransactionStart("foo")
+	err = scc.putChaincodeCollectionData(stub, cd, []byte("barf"))
+	assert.Error(t, err)
+	stub.MockTransactionEnd("foo")
+
+	stub.MockTransactionStart("foo")
+	err = scc.putChaincodeCollectionData(stub, cd, ccpBytes)
+	assert.NoError(t, err)
+	stub.MockTransactionEnd("foo")
+
+	stub.MockTransactionStart("foo")
+	err = scc.putChaincodeCollectionData(stub, cd, ccpBytes)
+	assert.Error(t, err)
+	stub.MockTransactionEnd("foo")
+}
+
 var id msp.SigningIdentity
 var chainid string = util.GetTestChainID()
 var mockAclProvider *mocks.MockACLProvider
@@ -562,7 +621,14 @@ func TestMain(m *testing.M) {
 	mockAclProvider = &mocks.MockACLProvider{}
 	mockAclProvider.Reset()
 
-	sysccprovider.RegisterSystemChaincodeProviderFactory(&mscc.MocksccProviderFactory{})
+	sysccprovider.RegisterSystemChaincodeProviderFactory(
+		&mscc.MocksccProviderFactory{
+			ApplicationConfigBool: true,
+			ApplicationConfigRv: &config.MockApplication{
+				CapabilitiesRv: &config.MockApplicationCapabilities{},
+			},
+		},
+	)
 	aclmgmt.RegisterACLProvider(mockAclProvider)
 
 	os.Exit(m.Run())

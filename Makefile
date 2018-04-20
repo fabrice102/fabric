@@ -18,6 +18,7 @@
 #   - release-all - builds release packages for all target platforms
 #   - unit-test - runs the go-test based unit tests
 #   - verify - runs unit tests for only the changed package tree
+#   - profile - runs unit tests for all packages in coverprofile mode (slow)
 #   - test-cmd - generates a "go test" string suitable for manual customization
 #   - behave - runs the behave test
 #   - behave-deps - ensures pre-requisites are available for running behave manually
@@ -26,6 +27,7 @@
 #   - license - checks go source files for Apache license header
 #   - native - ensures all native binaries are available
 #   - docker[-clean] - ensures all docker images are available[/cleaned]
+#   - docker-list - generates a list of docker images that 'make docker' produces
 #   - peer-docker[-clean] - ensures the peer container is available[/cleaned]
 #   - orderer-docker[-clean] - ensures the orderer container is available[/cleaned]
 #   - tools-docker[-clean] - ensures the tools container is available[/cleaned]
@@ -34,9 +36,16 @@
 #   - clean-all - superset of 'clean' that also removes persistent state
 #   - dist-clean - clean release packages for all target platforms
 #   - unit-test-clean - cleans unit test state (particularly from docker)
+#   - basic-checks - performs basic checks like license, spelling and linter
+#   - enable_ci_only_tests - triggers unit-tests in downstream jobs. Applicable only for CI not to
+#     use in the local machine.
+#   - docker-thirdparty - pulls thirdparty images (kafka,zookeeper,couchdb)
 
-BASE_VERSION = 1.1.0-alpha-mpc
-PREV_VERSION = 1.1.0-preview
+BASE_VERSION = 1.1.1-mpc
+PREV_VERSION = 1.1.0
+CHAINTOOL_RELEASE=1.1.0
+BASEIMAGE_RELEASE=0.4.6
+
 # Allow to build as a submodule setting the main project to
 # the PROJECT_NAME env variable, for example,
 # export PROJECT_NAME=hyperledger/fabric-test
@@ -63,8 +72,6 @@ PKGNAME = github.com/$(PROJECT_NAME)
 CGO_FLAGS = CGO_CFLAGS=" "
 ARCH=$(shell uname -m)
 MARCH=$(shell go env GOOS)-$(shell go env GOARCH)
-CHAINTOOL_RELEASE=1.0.1
-BASEIMAGE_RELEASE=$(shell cat ./.baseimage-release)
 
 # defined in common/metadata/metadata.go
 METADATA_VAR = Version=$(PROJECT_VERSION)
@@ -112,16 +119,19 @@ all: native docker checks
 
 checks: license spelling linter unit-test behave
 
+basic-checks: license spelling linter
+
 desk-check: license spelling linter verify behave
 
+# Pull thirdparty docker images based on the latest baseimage release version
 .PHONY: docker-thirdparty
 docker-thirdparty:
-	docker pull $(DOCKER_NS)/fabric-couchdb:$(PREV_TAG)
-	docker tag $(DOCKER_NS)/fabric-couchdb:$(PREV_TAG) $(DOCKER_NS)/fabric-couchdb
-	docker pull $(DOCKER_NS)/fabric-zookeeper:$(PREV_TAG)
-	docker tag $(DOCKER_NS)/fabric-zookeeper:$(PREV_TAG) $(DOCKER_NS)/fabric-zookeeper
-	docker pull $(DOCKER_NS)/fabric-kafka:$(PREV_TAG)
-	docker tag $(DOCKER_NS)/fabric-kafka:$(PREV_TAG) $(DOCKER_NS)/fabric-kafka
+	docker pull $(BASE_DOCKER_NS)/fabric-couchdb:$(BASE_DOCKER_TAG)
+	docker tag $(BASE_DOCKER_NS)/fabric-couchdb:$(BASE_DOCKER_TAG) $(DOCKER_NS)/fabric-couchdb
+	docker pull $(BASE_DOCKER_NS)/fabric-zookeeper:$(BASE_DOCKER_TAG)
+	docker tag $(BASE_DOCKER_NS)/fabric-zookeeper:$(BASE_DOCKER_TAG) $(DOCKER_NS)/fabric-zookeeper
+	docker pull $(BASE_DOCKER_NS)/fabric-kafka:$(BASE_DOCKER_TAG)
+	docker tag $(BASE_DOCKER_NS)/fabric-kafka:$(BASE_DOCKER_TAG) $(DOCKER_NS)/fabric-kafka
 
 .PHONY: spelling
 spelling:
@@ -170,25 +180,31 @@ javaenv: build/image/javaenv/$(DUMMY)
 buildenv: build/image/buildenv/$(DUMMY)
 
 build/image/testenv/$(DUMMY): build/image/buildenv/$(DUMMY)
-testenv: build/image/testenv/$(DUMMY)
+testenv: build/image/testenv/$(DUMMY) docker-thirdparty
 
-unit-test: unit-test-clean peer-docker testenv
+unit-test: unit-test-clean peer-docker testenv docker-thirdparty
 	cd unit-test && docker-compose up --abort-on-container-exit --force-recreate && docker-compose down
 
 unit-tests: unit-test
 
+enable_ci_only_tests: testenv
+	cd unit-test && docker-compose up --abort-on-container-exit --force-recreate && docker-compose down
+
 verify: unit-test-clean peer-docker testenv
 	cd unit-test && JOB_TYPE=VERIFY docker-compose up --abort-on-container-exit --force-recreate && docker-compose down
+
+profile: unit-test-clean peer-docker testenv
+	cd unit-test && JOB_TYPE=PROFILE docker-compose up --abort-on-container-exit --force-recreate && docker-compose down
 
 # Generates a string to the terminal suitable for manual augmentation / re-issue, useful for running tests by hand
 test-cmd:
 	@echo "go test -tags \"$(GO_TAGS)\" -ldflags \"$(GO_LDFLAGS)\""
 
-docker: docker-thirdparty $(patsubst %,build/image/%/$(DUMMY), $(IMAGES))
+docker: $(patsubst %,build/image/%/$(DUMMY), $(IMAGES))
 
 native: peer orderer configtxgen cryptogen configtxlator
 
-behave-deps: docker peer build/bin/block-listener configtxgen cryptogen
+behave-deps: docker docker-thirdparty peer build/bin/block-listener configtxgen cryptogen
 behave: behave-deps
 	@echo "Running behave tests"
 	@cd bddtests; behave $(BEHAVE_OPTS)
@@ -383,29 +399,24 @@ release/%/install: $(PROJECT_FILES)
 		@chmod +x $(@D)/bin/get-docker-images.sh
 
 .PHONY: dist
-dist: dist-clean release
-	cd release/$(MARCH) && tar -czvf hyperledger-fabric-$(MARCH).$(PROJECT_VERSION).tar.gz *
+dist: dist-clean dist/$(MARCH)
 
-dist-all: dist-clean release-all $(patsubst %,dist/%, $(RELEASE_PLATFORMS))
+dist-all: dist-clean $(patsubst %,dist/%, $(RELEASE_PLATFORMS))
 
-dist/windows-amd64:
-	cd release/windows-amd64 && tar -czvf hyperledger-fabric-windows-amd64.$(PROJECT_VERSION).tar.gz *
-
-dist/darwin-amd64:
-	cd release/darwin-amd64 && tar -czvf hyperledger-fabric-darwin-amd64.$(PROJECT_VERSION).tar.gz *
-
-dist/linux-amd64:
-	cd release/linux-amd64 && tar -czvf hyperledger-fabric-linux-amd64.$(PROJECT_VERSION).tar.gz *
-
-dist/linux-ppc64le:
-	cd release/linux-ppc64le && tar -czvf hyperledger-fabric-linux-ppc64le.$(PROJECT_VERSION).tar.gz *
-
-dist/linux-s390x:
-	cd release/linux-s390x && tar -czvf hyperledger-fabric-linux-s390x.$(PROJECT_VERSION).tar.gz *
+dist/%: release/%
+	mkdir -p release/$(@F)/config
+	cp -r sampleconfig/*.yaml release/$(@F)/config
+	cd release/$(@F) && tar -czvf hyperledger-fabric-$(@F).$(PROJECT_VERSION).tar.gz *
 
 .PHONY: protos
 protos: buildenv
 	@$(DRUN) $(DOCKER_NS)/fabric-buildenv:$(DOCKER_TAG) ./scripts/compile_protos.sh
+
+%-docker-list:
+	$(eval TARGET = ${patsubst %-docker-list,%,${@}})
+	@echo $(DOCKER_NS)/fabric-$(TARGET):$(DOCKER_TAG)
+
+docker-list: $(patsubst %,%-docker-list, $(IMAGES))
 
 %-docker-clean:
 	$(eval TARGET = ${patsubst %-docker-clean,%,${@}})

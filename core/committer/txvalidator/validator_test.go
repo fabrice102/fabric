@@ -24,6 +24,7 @@ import (
 
 	"github.com/hyperledger/fabric/common/cauthdsl"
 	ctxt "github.com/hyperledger/fabric/common/configtx/test"
+	commonerrors "github.com/hyperledger/fabric/common/errors"
 	ledger2 "github.com/hyperledger/fabric/common/ledger"
 	"github.com/hyperledger/fabric/common/ledger/testutil"
 	mockconfig "github.com/hyperledger/fabric/common/mocks/config"
@@ -206,6 +207,38 @@ func TestInvokeOK(t *testing.T) {
 	err := v.Validate(b)
 	assert.NoError(t, err)
 	assertValid(b, t)
+}
+
+func TestInvokeOKPvtDataOnly(t *testing.T) {
+	l, v := setupLedgerAndValidator(t)
+	defer ledgermgmt.CleanupTestEnv()
+	defer l.Close()
+
+	v.(*txValidator).support.(struct {
+		*mocktxvalidator.Support
+		*semaphore.Weighted
+	}).ACVal = &mockconfig.MockApplicationCapabilities{PrivateChannelDataRv: true}
+
+	ccID := "mycc"
+
+	putCCInfo(l, ccID, signedByAnyMember([]string{"DEFAULT"}), t)
+
+	rwsetBuilder := rwsetutil.NewRWSetBuilder()
+	rwsetBuilder.AddToPvtAndHashedWriteSet(ccID, "mycollection", "somekey", nil)
+	rwset, err := rwsetBuilder.GetTxSimulationResults()
+	assert.NoError(t, err)
+	rwsetBytes, err := rwset.GetPubSimulationBytes()
+	assert.NoError(t, err)
+
+	tx := getEnv(ccID, rwsetBytes, t)
+	b := &common.Block{Data: &common.BlockData{Data: [][]byte{utils.MarshalOrPanic(tx)}}}
+
+	v.(*txValidator).vscc.(*vsccValidatorImpl).ccprovider.(*ccprovider.MockCcProviderImpl).ExecuteResultProvider = nil
+	v.(*txValidator).vscc.(*vsccValidatorImpl).ccprovider.(*ccprovider.MockCcProviderImpl).ExecuteChaincodeResponse = &peer.Response{Status: shim.ERROR}
+
+	err = v.Validate(b)
+	assert.NoError(t, err)
+	assertInvalid(b, t, peer.TxValidationCode_ENDORSEMENT_POLICY_FAILURE)
 }
 
 func TestInvokeOKSCC(t *testing.T) {
@@ -576,7 +609,7 @@ func TestLedgerIsNoAvailable(t *testing.T) {
 	// We suppose to get the error which indicates we cannot commit the block
 	assertion.Error(err)
 	// The error exptected to be of type VSCCInfoLookupFailureError
-	assertion.NotNil(err.(*VSCCInfoLookupFailureError))
+	assertion.NotNil(err.(*commonerrors.VSCCInfoLookupFailureError))
 }
 
 func TestValidationInvalidEndorsing(t *testing.T) {
@@ -656,7 +689,7 @@ func TestValidationResourceUpdate(t *testing.T) {
 	})
 	err := validator.Validate(b1)
 	assert.NoError(t, err)
-	sup.ACVal = &mockconfig.MockApplicationCapabilities{LifecycleViaConfigRv: true}
+	sup.ACVal = &mockconfig.MockApplicationCapabilities{ResourcesTreeRv: true}
 	err = validator.Validate(b2)
 	assert.NoError(t, err)
 	// Restore default callback

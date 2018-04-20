@@ -120,16 +120,22 @@ type ApplicationCapabilities interface {
 	// in the same block or whether we mark the second one as TxValidationCode_DUPLICATE_TXID
 	ForbidDuplicateTXIdInBlock() bool
 
-	// LifecycleViaConfig returns true if chaincode lifecycle should be managed via the resources config
-	// tree rather than via the deprecated v1.0 endorser tx mechanism.
-	LifecycleViaConfig() bool
+	// ResourcesTree returns true if the peer should process the experimental resources transactions
+	ResourcesTree() bool
+
+	// PrivateChannelData returns true if support for private channel data (a.k.a. collections) is enabled.
+	PrivateChannelData() bool
+
+	// V1_1Validation returns true is this channel is configured to perform stricter validation
+	// of transactions (as introduced in v1.1).
+	V1_1Validation() bool
 }
 
 // OrdererCapabilities defines the capabilities for the orderer portion of a channel
 type OrdererCapabilities interface {
-	// SetChannelModPolicyDuringCreate specifies whether the v1.0 undesirable behavior of setting the /Channel
-	// group's mod_policy to "" should be fixed or not.
-	SetChannelModPolicyDuringCreate() bool
+	// PredictableChannelTemplate specifies whether the v1.0 undesirable behavior of setting the /Channel
+	// group's mod_policy to "" and copy versions from the orderer system channel config should be fixed or not.
+	PredictableChannelTemplate() bool
 
 	// Resubmission specifies whether the v1.0 non-deterministic commitment of tx should be fixed by re-submitting
 	// the re-validated tx.
@@ -137,6 +143,10 @@ type OrdererCapabilities interface {
 
 	// Supported returns an error if there are unknown capabilities in this channel which are required
 	Supported() error
+
+	// ExpirationCheck specifies whether the orderer checks for identity expiration checks
+	// when validating messages
+	ExpirationCheck() bool
 }
 
 // Resources is the common set of config resources for all channels

@@ -51,7 +51,7 @@ Here's the help text for the ``byfn.sh`` script:
 
   ./byfn.sh --help
   Usage:
-  byfn.sh -m up|down|restart|generate [-c <channel name>] [-t <timeout>] [-d <delay>] [-f <docker-compose-file>] [-s <dbtype>]
+  byfn.sh up|down|restart|generate [-c <channel name>] [-t <timeout>] [-d <delay>] [-f <docker-compose-file>] [-s <dbtype>]
   byfn.sh -h|--help (print this message)
     -m <mode> - one of 'up', 'down', 'restart' or 'generate'
       - 'up' - bring up the network with docker-compose up
@@ -59,11 +59,12 @@ Here's the help text for the ``byfn.sh`` script:
       - 'restart' - restart the network
       - 'generate' - generate required certificates and genesis block
     -c <channel name> - channel name to use (defaults to "mychannel")
-    -t <timeout> - CLI timeout duration in seconds (defaults to 10000)
+    -t <timeout> - CLI timeout duration in seconds (defaults to 10)
     -d <delay> - delay duration in seconds (defaults to 3)
     -f <docker-compose-file> - specify which docker-compose file use (defaults to docker-compose-cli.yaml)
     -s <dbtype> - the database backend to use: goleveldb (default) or couchdb
     -l <language> - the chaincode language: golang (default) or node
+    -a - don't ask for confirmation before proceeding
 
     Typically, one would first generate the required certificates and
     genesis block, then bring up the network. e.g.:
@@ -74,7 +75,8 @@ Here's the help text for the ``byfn.sh`` script:
 If you choose not to supply a channel name, then the
 script will use a default name of ``mychannel``.  The CLI timeout parameter
 (specified with the -t flag) is an optional value; if you choose not to set
-it, then your CLI container will exit after the default setting of 10000 seconds.
+it, then the CLI will give up on query requests made after the default
+setting of 10 seconds.
 
 Generate Network Artifacts
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -86,12 +88,12 @@ Ready to give it a go? Okay then! Execute the following command:
   ./byfn.sh -m generate
 
 You will see a brief description as to what will occur, along with a yes/no command line
-prompt. Respond with a ``y`` to execute the described action.
+prompt. Respond with a ``y`` or hit the return key to execute the described action.
 
 .. code:: bash
 
-  Generating certs and genesis block for with channel 'mychannel' and CLI timeout of '10000'
-  Continue (y/n)?y
+  Generating certs and genesis block for with channel 'mychannel' and CLI timeout of '10'
+  Continue? [Y/n] y
   proceeding ...
   /Users/xxx/dev/fabric-samples/bin/cryptogen
 
@@ -149,7 +151,7 @@ Next, you can bring the network up with one of the following commands:
 
 The above command will compile Golang chaincode images and spin up the corresponding
 containers.  Go is the default chaincode language, however there is also support
-for Node.js chaincode.  If you'd like to run through this tutorial with node
+for `Node.js <https://fabric-shim.github.io/>`__ chaincode.  If you'd like to run through this tutorial with node
 chaincode, pass the following command instead:
 
 .. code:: bash
@@ -163,12 +165,12 @@ chaincode, pass the following command instead:
           documentation for more info on the node.js chaincode shim APIs.
 
 Once again, you will be prompted as to whether you wish to continue or abort.
-Respond with a ``y``:
+Respond with a ``y`` or hit the return key:
 
 .. code:: bash
 
-  Starting with channel 'mychannel' and CLI timeout of '10000'
-  Continue (y/n)?y
+  Starting with channel 'mychannel' and CLI timeout of '10'
+  Continue? [Y/n]
   proceeding ...
   Creating network "net_byfn" with the default driver
   Creating peer0.org1.example.com
@@ -194,13 +196,9 @@ completion, it should report the following in your terminal window:
 
 .. code:: bash
 
-    2017-05-16 17:08:01.366 UTC [msp] GetLocalMSP -> DEBU 004 Returning existing local MSP
-    2017-05-16 17:08:01.366 UTC [msp] GetDefaultSigningIdentity -> DEBU 005 Obtaining default signing identity
-    2017-05-16 17:08:01.366 UTC [msp/identity] Sign -> DEBU 006 Sign: plaintext: 0AB1070A6708031A0C08F1E3ECC80510...6D7963631A0A0A0571756572790A0161
-    2017-05-16 17:08:01.367 UTC [msp/identity] Sign -> DEBU 007 Sign: digest: E61DB37F4E8B0D32C9FE10E3936BA9B8CD278FAA1F3320B08712164248285C54
     Query Result: 90
     2017-05-16 17:08:15.158 UTC [main] main -> INFO 008 Exiting.....
-    ===================== Query on PEER3 on channel 'mychannel' is successful =====================
+    ===================== Query on peer1.org2 on channel 'mychannel' is successful =====================
 
     ===================== All GOOD, BYFN execution completed =====================
 
@@ -226,12 +224,12 @@ and four artifacts, and delete the chaincode images from your Docker Registry:
 
   ./byfn.sh -m down
 
-Once again, you will be prompted to continue, respond with a ``y``:
+Once again, you will be prompted to continue, respond with a ``y`` or hit the return key:
 
 .. code:: bash
 
-  Stopping with channel 'mychannel' and CLI timeout of '10000'
-  Continue (y/n)?y
+  Stopping with channel 'mychannel' and CLI timeout of '10'
+  Continue? [Y/n] y
   proceeding ...
   WARNING: The CHANNEL_NAME variable is not set. Defaulting to a blank string.
   WARNING: The TIMEOUT variable is not set. Defaulting to a blank string.
@@ -245,6 +243,24 @@ Once again, you will be prompted to continue, respond with a ``y``:
 If you'd like to learn more about the underlying tooling and bootstrap mechanics,
 continue reading.  In these next sections we'll walk through the various steps
 and requirements to build a fully-functional Hyperledger Fabric network.
+
+.. note:: The manual steps outlined below assume that the ``CORE_LOGGING_LEVEL`` in
+          the ``cli`` container is set to ``DEBUG``. You can set this by modifying
+          the ``docker-compose-cli.yaml`` file in the ``first-network`` directory.
+          e.g.
+
+          .. code::
+
+            cli:
+              container_name: cli
+              image: hyperledger/fabric-tools:$IMAGE_TAG
+              tty: true
+              stdin_open: true
+              environment:
+                - GOPATH=/opt/gopath
+                - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+                - CORE_LOGGING_LEVEL=DEBUG
+                #- CORE_LOGGING_LEVEL=INFO
 
 Crypto Generator
 ----------------
@@ -300,13 +316,14 @@ and "Specs" parameters under the ``OrdererOrgs`` header:
       - Hostname: orderer
   # -------------------------------------------------------
   # "PeerOrgs" - Definition of organizations managing peer nodes
-  # ------------------------------------------------------
+   # ------------------------------------------------------
   PeerOrgs:
   # -----------------------------------------------------
   # Org1
   # ----------------------------------------------------
   - Name: Org1
     Domain: org1.example.com
+    EnableNodeOUs: true
 
 The naming convention for a network entity is as follows -
 "{{.Hostname}}.{{.Domain}}".  So using our ordering node as a
@@ -460,40 +477,27 @@ Now, we will define the anchor peer for Org2 on the same channel:
 Start the network
 -----------------
 
-We will leverage a docker-compose script to spin up our network. The
+We will leverage a script to spin up our network. The
 docker-compose file references the images that we have previously downloaded,
 and bootstraps the orderer with our previously generated ``genesis.block``.
 
-.. note:: Before launching the network, open the ``docker-compose-cli.yaml`` file
-          and comment out the script.sh in the CLI container. Your docker-compose
-          should be modified to look like this:
+We want to go through the commands manually in order to expose the
+syntax and functionality of each call.
+
+First let's start your network:
 
 .. code:: bash
 
-  working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
-  # command: /bin/bash -c './scripts/script.sh ${CHANNEL_NAME}; sleep $TIMEOUT'
-  volumes
-
-If left uncommented, that script will exercise all of the CLI commands when the
-network is started, as we describe in the :ref:`behind-scenes` section.
-However, we want to go through the commands manually in order
-to expose the syntax and functionality of each call.
-
-The CLI timeout defaults to 10000 seconds.  If you need the container available
-for longer, you can overwrite this setting by passing in a value for the ``TIMEOUT``
-environment variable.
-
-Start your network:
-
-.. code:: bash
-
-    # if you need the CLI accessible beyond 10000 seconds, pass in TIMEOUT=<your_desired_value>
-    # after the CHANNEL_NAME variable
-
-    CHANNEL_NAME=$CHANNEL_NAME docker-compose -f docker-compose-cli.yaml up -d
+    docker-compose -f docker-compose-cli.yaml up -d
 
 If you want to see the realtime logs for your network, then do not supply the ``-d`` flag.
 If you let the logs stream, then you will need to open a second terminal to execute the CLI calls.
+
+The CLI container will stick around idle for 1000 seconds. If it's gone when you need it you can restart it with a simple command:
+
+.. code:: bash
+
+    docker start cli
 
 .. _peerenvvars:
 
@@ -668,7 +672,7 @@ argument. This is our policy where we specify the required level of endorsement
 for a transaction against this chaincode to be validated.
 
 In the command below you’ll notice that we specify our policy as
-``-P "OR ('Org0MSP.member','Org1MSP.member')"``. This means that we need
+``-P "OR ('Org0MSP.peer','Org1MSP.peer')"``. This means that we need
 “endorsement” from a peer belonging to Org1 **OR** Org2 (i.e. only one endorsement).
 If we changed the syntax to ``AND`` then we would need two endorsements.
 
@@ -679,7 +683,7 @@ If we changed the syntax to ``AND`` then we would need two endorsements.
     # be sure to replace the $CHANNEL_NAME environment variable if you have not exported it
     # if you did not install your chaincode with a name of mycc, then modify that argument as well
 
-    peer chaincode instantiate -o orderer.example.com:7050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C $CHANNEL_NAME -n mycc -v 1.0 -c '{"Args":["init","a", "100", "b","200"]}' -P "OR ('Org1MSP.member','Org2MSP.member')"
+    peer chaincode instantiate -o orderer.example.com:7050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C $CHANNEL_NAME -n mycc -v 1.0 -c '{"Args":["init","a", "100", "b","200"]}' -P "OR ('Org1MSP.peer','Org2MSP.peer')"
 
 **Node.js**
 
@@ -693,7 +697,7 @@ If we changed the syntax to ``AND`` then we would need two endorsements.
     # if you did not install your chaincode with a name of mycc, then modify that argument as well
     # notice that we must pass the -l flag after the chaincode name to identify the language
 
-    peer chaincode instantiate -o orderer.example.com:7050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C $CHANNEL_NAME -n mycc -l node -v 1.0 -c '{"Args":["init","a", "100", "b","200"]}' -P "OR ('Org1MSP.member','Org2MSP.member')"
+    peer chaincode instantiate -o orderer.example.com:7050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C $CHANNEL_NAME -n mycc -l node -v 1.0 -c '{"Args":["init","a", "100", "b","200"]}' -P "OR ('Org1MSP.peer','Org2MSP.peer')"
 
 See the `endorsement
 policies <http://hyperledger-fabric.readthedocs.io/en/latest/endorsement-policies.html>`__
@@ -762,9 +766,8 @@ What's happening behind the scenes?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. note:: These steps describe the scenario in which
-          ``script.sh`` is not commented out in the
-          docker-compose-cli.yaml file.  Clean your network
-          with ``./byfn.sh -m down`` and ensure
+          ``script.sh`` is run by './byfn.sh up'.  Clean your network
+          with ``./byfn.sh down`` and ensure
           this command is active.  Then use the same
           docker-compose prompt to launch your network again
 
@@ -805,7 +808,7 @@ What's happening behind the scenes?
 
 -  The instantiation also passes in an argument for the endorsement
    policy. The policy is defined as
-   ``-P "OR    ('Org1MSP.member','Org2MSP.member')"``, meaning that any
+   ``-P "OR    ('Org1MSP.peer','Org2MSP.peer')"``, meaning that any
    transaction must be endorsed by a peer tied to Org1 or Org2.
 
 -  A query against the value of "a" is issued to ``peer0.org1.example.com``. The
@@ -858,7 +861,7 @@ You should see the following output:
       2017-05-16 17:08:01.367 UTC [msp/identity] Sign -> DEBU 007 Sign: digest: E61DB37F4E8B0D32C9FE10E3936BA9B8CD278FAA1F3320B08712164248285C54
       Query Result: 90
       2017-05-16 17:08:15.158 UTC [main] main -> INFO 008 Exiting.....
-      ===================== Query on PEER3 on channel 'mychannel' is successful =====================
+      ===================== Query on peer1.org2 on channel 'mychannel' is successful =====================
 
       ===================== All GOOD, BYFN execution completed =====================
 
@@ -942,7 +945,7 @@ the network pass ``docker-compose-couch.yaml`` as well:
 
 .. code:: bash
 
-    CHANNEL_NAME=$CHANNEL_NAME TIMEOUT=<pick_a_value> docker-compose -f docker-compose-cli.yaml -f docker-compose-couch.yaml up -d
+    docker-compose -f docker-compose-cli.yaml -f docker-compose-couch.yaml up -d
 
 **chaincode_example02** should now work using CouchDB underneath.
 
@@ -970,8 +973,8 @@ channel, use the following steps to interact with the **marbles02** chaincode:
 
        # be sure to modify the $CHANNEL_NAME variable accordingly for the instantiate command
 
-       peer chaincode install -n marbles -v 1.0 -p github.com/hyperledger/fabric/examples/chaincode/go/marbles02
-       peer chaincode instantiate -o orderer.example.com:7050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C $CHANNEL_NAME -n marbles -v 1.0 -c '{"Args":["init"]}' -P "OR ('Org0MSP.member','Org1MSP.member')"
+       peer chaincode install -n marbles -v 1.0 -p github.com/chaincode/marbles02/go
+       peer chaincode instantiate -o orderer.example.com:7050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C $CHANNEL_NAME -n marbles -v 1.0 -c '{"Args":["init"]}' -P "OR ('Org0MSP.peer','Org1MSP.peer')"
 
 -  Create some marbles and move them around:
 
@@ -1036,7 +1039,7 @@ The output should display the two marbles owned by ``jerry``:
 
 Why CouchDB
 -------------
-CouchDB is a kind of NoSQL solution. It is a document oriented database where document fields are stored as key-value mpas. Fields can be either a simple key/value pair, list, or map.
+CouchDB is a kind of NoSQL solution. It is a document-oriented database where document fields are stored as key-value maps. Fields can be either a simple key-value pair, list, or map.
 In addition to keyed/composite-key/key-range queries which are supported by LevelDB, CouchDB also supports full data rich queries capability, such as non-key queries against the whole blockchain data,
 since its data content is stored in JSON format and fully queryable. Therefore, CouchDB can meet chaincode, auditing, reporting requirements for many use cases that not supported by LevelDB.
 

@@ -18,10 +18,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric/common/deliver"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/localmsp"
 	"github.com/hyperledger/fabric/common/viperutil"
 	"github.com/hyperledger/fabric/core"
+	"github.com/hyperledger/fabric/core/aclmgmt"
 	"github.com/hyperledger/fabric/core/chaincode"
 	"github.com/hyperledger/fabric/core/chaincode/accesscontrol"
 	"github.com/hyperledger/fabric/core/comm"
@@ -34,13 +37,15 @@ import (
 	"github.com/hyperledger/fabric/core/peer"
 	"github.com/hyperledger/fabric/core/scc"
 	"github.com/hyperledger/fabric/events/producer"
+	common2 "github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/gossip/service"
+	"github.com/hyperledger/fabric/msp"
 	"github.com/hyperledger/fabric/msp/mgmt"
 	"github.com/hyperledger/fabric/peer/common"
 	peergossip "github.com/hyperledger/fabric/peer/gossip"
 	"github.com/hyperledger/fabric/peer/version"
+	cb "github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/ledger/rwset"
-	ab "github.com/hyperledger/fabric/protos/orderer"
 	pb "github.com/hyperledger/fabric/protos/peer"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -91,14 +96,24 @@ func initSysCCs() {
 }
 
 func serve(args []string) error {
+	// currently the peer only works with the standard MSP
+	// because in certain scenarios the MSP has to make sure
+	// that from a single credential you only have a single 'identity'.
+	// Idemix does not support this *YET* but it can be easily
+	// fixed to support it. For now, we just make sure that
+	// the peer only comes up with the standard MSP
+	mspType := mgmt.GetLocalMSP().GetType()
+	if mspType != msp.FABRIC {
+		panic("Unsupported msp type " + msp.ProviderTypeToString(mspType))
+	}
+
 	logger.Infof("Starting %s", version.GetInfo())
 
-	//aclmgmt initializes a proxy Processor that will be redirected to RSCC provider
-	//or default ACL Provider (for 1.0 behavior if RSCC is not enabled or available)
+	//startup aclmgmt with default ACL providers (resource based and default 1.0 policies based).
+	//Users can pass in their own ACLProvider to RegisterACLProvider (currently unit tests do this)
+	aclmgmt.RegisterACLProvider(nil)
 
-	// TODO RSCC-cleanup: remove the commented code (?)
-	// aclmgmt.GetConfigTxProcessor()
-	// txprocessors := customtx.Processors{cb.HeaderType_CONFIG: aclmgmt.GetConfigTxProcessor()}
+	//initialize resource management exit
 	ledgermgmt.Initialize(peer.ConfigTxProcessors)
 
 	// Parameter overrides must be processed before any parameters are
@@ -157,10 +172,15 @@ func serve(args []string) error {
 		grpclog.Fatalf("Failed to create ehub server: %v", err)
 	}
 
-	// create the peer's AtomicBroadcastServer, which supports deliver but not
-	// broadcast
-	abServer := peer.NewAtomicBroadcastServer()
-	ab.RegisterAtomicBroadcastServer(peerServer.Server(), abServer)
+	mutualTLS := serverConfig.SecOpts.UseTLS && serverConfig.SecOpts.RequireClientCert
+	policyCheckerProvider := func(resourceName string) deliver.PolicyChecker {
+		return func(env *cb.Envelope, channelID string) error {
+			return aclmgmt.GetACLProvider().CheckACL(resourceName, channelID, env)
+		}
+	}
+
+	abServer := peer.NewDeliverEventsServer(mutualTLS, policyCheckerProvider, &peer.DeliverSupportManager{})
+	pb.RegisterDeliverServer(peerServer.Server(), abServer)
 
 	// enable the cache of chaincode info
 	ccprovider.EnableCCInfoCache()
@@ -233,7 +253,20 @@ func serve(args []string) error {
 		}
 		return dialOpts
 	}
-	err = service.InitGossipService(serializedIdentity, peerEndpoint.Address, peerServer.Server(),
+
+	var certs *common2.TLSCertificates
+	if peerServer.TLSEnabled() {
+		serverCert := peerServer.ServerCertificate()
+		clientCert, err := peer.GetClientCertificate()
+		if err != nil {
+			return errors.Wrap(err, "failed obtaining client certificates")
+		}
+		certs = &common2.TLSCertificates{}
+		certs.TLSServerCert.Store(&serverCert)
+		certs.TLSClientCert.Store(&clientCert)
+	}
+
+	err = service.InitGossipService(serializedIdentity, peerEndpoint.Address, peerServer.Server(), certs,
 		messageCryptoService, secAdv, secureDialOpts, bootstrap...)
 	if err != nil {
 		return err
@@ -361,8 +394,8 @@ func createChaincodeServer(ca accesscontrol.CA, peerHostname string) (srv comm.G
 			// Trust only client certificates signed by ourselves
 			ClientRootCAs: [][]byte{ca.CertBytes()},
 			// Use our own self-signed TLS certificate and key
-			ServerCertificate: certKeyPair.Cert,
-			ServerKey:         certKeyPair.Key,
+			Certificate: certKeyPair.Cert,
+			Key:         certKeyPair.Key,
 			// No point in specifying server root CAs since this TLS config is only used for
 			// a gRPC server and not a client
 			ServerRootCAs: nil,
@@ -500,11 +533,36 @@ func createEventHubServer(serverConfig comm.ServerConfig) (comm.GRPCServer, erro
 		return nil, err
 	}
 
-	ehConfig := &producer.EventsServerConfig{BufferSize: uint(viper.GetInt("peer.events.buffersize")), Timeout: viper.GetDuration("peer.events.timeout"), TimeWindow: viper.GetDuration("peer.events.timewindow")}
+	mutualTLS := serverConfig.SecOpts.UseTLS && serverConfig.SecOpts.RequireClientCert
+	ehConfig := initializeEventsServerConfig(mutualTLS)
 	ehServer := producer.NewEventsServer(ehConfig)
 	pb.RegisterEventsServer(grpcServer.Server(), ehServer)
 
 	return grpcServer, nil
+}
+
+func initializeEventsServerConfig(mutualTLS bool) *producer.EventsServerConfig {
+	extract := func(msg proto.Message) []byte {
+		evt, isEvent := msg.(*pb.Event)
+		if !isEvent || evt == nil {
+			return nil
+		}
+		return evt.TlsCertHash
+	}
+
+	ehConfig := &producer.EventsServerConfig{
+		BufferSize:       uint(viper.GetInt("peer.events.buffersize")),
+		Timeout:          viper.GetDuration("peer.events.timeout"),
+		TimeWindow:       viper.GetDuration("peer.events.timewindow"),
+		BindingInspector: comm.NewBindingInspector(mutualTLS, extract)}
+
+	if ehConfig.TimeWindow == 0*time.Minute {
+		defaultTimeWindow := 15 * time.Minute
+		logger.Warningf("`peer.events.timewindow` not set; defaulting to %s", defaultTimeWindow)
+		ehConfig.TimeWindow = defaultTimeWindow
+	}
+
+	return ehConfig
 }
 
 func writePid(fileName string, pid int) error {

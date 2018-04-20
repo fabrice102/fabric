@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -19,8 +20,10 @@ import (
 
 	pb "github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/configtx/test"
+	errors2 "github.com/hyperledger/fabric/common/errors"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/core/committer"
+	"github.com/hyperledger/fabric/core/committer/txvalidator"
 	"github.com/hyperledger/fabric/core/ledger"
 	"github.com/hyperledger/fabric/core/ledger/ledgermgmt"
 	"github.com/hyperledger/fabric/core/mocks/validator"
@@ -36,6 +39,7 @@ import (
 	pcomm "github.com/hyperledger/fabric/protos/common"
 	proto "github.com/hyperledger/fabric/protos/gossip"
 	"github.com/hyperledger/fabric/protos/ledger/rwset"
+	"github.com/op/go-logging"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -211,10 +215,11 @@ func (mc *mockCommitter) LedgerHeight() (uint64, error) {
 	mc.Lock()
 	m := mc.Mock
 	mc.Unlock()
-	if m.Called().Get(1) == nil {
-		return m.Called().Get(0).(uint64), nil
+	args := m.Called()
+	if args.Get(1) == nil {
+		return args.Get(0).(uint64), nil
 	}
-	return m.Called().Get(0).(uint64), m.Called().Get(1).(error)
+	return args.Get(0).(uint64), args.Get(1).(error)
 }
 
 func (mc *mockCommitter) GetBlocks(blockSeqs []uint64) []*pcomm.Block {
@@ -262,8 +267,12 @@ func newCommitter(id int) committer.Committer {
 	return committer.NewLedgerCommitter(ledger)
 }
 
-// Constructing pseudo peer node, simulating only gossip and state transfer part
 func newPeerNodeWithGossip(config *gossip.Config, committer committer.Committer, acceptor peerIdentityAcceptor, g gossip.Gossip) *peerNode {
+	return newPeerNodeWithGossipWithValidator(config, committer, acceptor, g, &validator.MockValidator{})
+}
+
+// Constructing pseudo peer node, simulating only gossip and state transfer part
+func newPeerNodeWithGossipWithValidator(config *gossip.Config, committer committer.Committer, acceptor peerIdentityAcceptor, g gossip.Gossip, v txvalidator.Validator) *peerNode {
 	cs := &cryptoServiceMock{acceptor: acceptor}
 	// Gossip component based on configuration provided and communication module
 	if g == nil {
@@ -278,7 +287,7 @@ func newPeerNodeWithGossip(config *gossip.Config, committer committer.Committer,
 
 	servicesAdapater := &ServicesMediator{GossipAdapter: g, MCSAdapter: cs}
 	coord := privdata.NewCoordinator(privdata.Support{
-		Validator:      &validator.MockValidator{},
+		Validator:      v,
 		TransientStore: &mockTransientStore{},
 		Committer:      committer,
 	}, pcomm.SignedData{})
@@ -558,6 +567,69 @@ func TestBlockingEnqueue(t *testing.T) {
 		time.Sleep(time.Millisecond * 10)
 		t.Log("got block", receivedBlock)
 	}
+}
+
+func TestHaltChainProcessing(t *testing.T) {
+	gossipChannel := func(c chan *proto.GossipMessage) <-chan *proto.GossipMessage {
+		return c
+	}
+	makeBlock := func(seq int) []byte {
+		b := &pcomm.Block{
+			Header: &pcomm.BlockHeader{
+				Number: uint64(seq),
+			},
+			Data: &pcomm.BlockData{
+				Data: [][]byte{},
+			},
+			Metadata: &pcomm.BlockMetadata{
+				Metadata: [][]byte{
+					{}, {}, {}, {},
+				},
+			},
+		}
+		data, _ := pb.Marshal(b)
+		return data
+	}
+	newBlockMsg := func(i int) *proto.GossipMessage {
+		return &proto.GossipMessage{
+			Channel: []byte("testchainid"),
+			Content: &proto.GossipMessage_DataMsg{
+				DataMsg: &proto.DataMessage{
+					Payload: &proto.Payload{
+						SeqNum: uint64(i),
+						Data:   makeBlock(i),
+					},
+				},
+			},
+		}
+	}
+	logAsserter := &logBackend{
+		logEntries: make(chan string, 100),
+	}
+	logger.SetBackend(logAsserter)
+	// Restore old backend at the end of the test
+	defer func() {
+		logger.SetBackend(defaultBackend())
+	}()
+
+	mc := &mockCommitter{}
+	mc.On("CommitWithPvtData", mock.Anything)
+	mc.On("LedgerHeight", mock.Anything).Return(uint64(1), nil)
+	g := &mocks.GossipMock{}
+	gossipMsgs := make(chan *proto.GossipMessage)
+
+	g.On("Accept", mock.Anything, false).Return(gossipChannel(gossipMsgs), nil)
+	g.On("Accept", mock.Anything, true).Return(nil, make(chan proto.ReceivedMessage))
+	g.On("PeersOfChannel", mock.Anything).Return([]discovery.NetworkMember{})
+
+	v := &validator.MockValidator{}
+	v.On("Validate").Return(&errors2.VSCCExecutionFailureError{
+		Reason: "foobar",
+	}).Once()
+	newPeerNodeWithGossipWithValidator(newGossipConfig(0), mc, noopPeerIdentityAcceptor, g, v)
+	gossipMsgs <- newBlockMsg(1)
+	logAsserter.assertLastLogContains(t, "Got error while committing")
+	logAsserter.assertLastLogContains(t, "foobar", "Aborting chain processing")
 }
 
 func TestFailures(t *testing.T) {
@@ -1605,4 +1677,41 @@ func waitUntilTrueOrTimeout(t *testing.T, predicate func() bool, timeout time.Du
 		break
 	}
 	logger.Debug("Stop waiting until timeout or true")
+}
+
+type logBackend struct {
+	logEntries chan string
+}
+
+func (l *logBackend) assertLastLogContains(t *testing.T, ss ...string) {
+	lastLogMsg := <-l.logEntries
+	for _, s := range ss {
+		assert.Contains(t, lastLogMsg, s)
+	}
+}
+
+func (l *logBackend) Log(lvl logging.Level, n int, r *logging.Record) error {
+	l.logEntries <- fmt.Sprint(r.Message(), r.Args)
+	return nil
+}
+
+func (*logBackend) GetLevel(string) logging.Level {
+	return logging.DEBUG
+}
+
+func (*logBackend) SetLevel(logging.Level, string) {
+	panic("implement me")
+}
+
+func (*logBackend) IsEnabledFor(logging.Level, string) bool {
+	return true
+}
+
+func defaultBackend() logging.LeveledBackend {
+	backend := logging.NewLogBackend(os.Stderr, "", 0)
+	defaultFormat := "%{color}%{time:2006-01-02 15:04:05.000 MST} [%{module}] %{shortfunc} -> %{level:.4s} %{id:03x}%{color:reset} %{message}"
+	backendFormatter := logging.NewBackendFormatter(backend, logging.MustStringFormatter(defaultFormat))
+	be := logging.SetBackend(backendFormatter)
+	be.SetLevel(logging.WARNING, "")
+	return be
 }

@@ -16,7 +16,6 @@ import (
 	"github.com/hyperledger/fabric/core/config"
 	"github.com/hyperledger/fabric/msp"
 	"github.com/hyperledger/fabric/peer/common"
-	pb "github.com/hyperledger/fabric/protos/peer"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 )
@@ -55,9 +54,9 @@ func TestInitConfig(t *testing.T) {
 	}
 }
 
-func TestINitCryptoMissingDir(t *testing.T) {
+func TestInitCryptoMissingDir(t *testing.T) {
 	dir := os.TempDir() + "/" + util.GenerateUUID()
-	err := common.InitCrypto(dir, "DEFAULT")
+	err := common.InitCrypto(dir, "DEFAULT", msp.ProviderTypeToString(msp.FABRIC))
 	assert.Error(t, err, "Should be able to initialize crypto with non-existing directory")
 	assert.Contains(t, err.Error(), fmt.Sprintf("missing %s folder", dir))
 }
@@ -66,12 +65,12 @@ func TestInitCrypto(t *testing.T) {
 
 	mspConfigPath, err := config.GetDevMspDir()
 	localMspId := "DEFAULT"
-	err = common.InitCrypto(mspConfigPath, localMspId)
+	err = common.InitCrypto(mspConfigPath, localMspId, msp.ProviderTypeToString(msp.FABRIC))
 	assert.NoError(t, err, "Unexpected error [%s] calling InitCrypto()", err)
-	err = common.InitCrypto("/etc/foobaz", localMspId)
+	err = common.InitCrypto("/etc/foobaz", localMspId, msp.ProviderTypeToString(msp.FABRIC))
 	assert.Error(t, err, fmt.Sprintf("Expected error [%s] calling InitCrypto()", err))
 	localMspId = ""
-	err = common.InitCrypto(mspConfigPath, localMspId)
+	err = common.InitCrypto(mspConfigPath, localMspId, msp.ProviderTypeToString(msp.FABRIC))
 	assert.Error(t, err, fmt.Sprintf("Expected error [%s] calling InitCrypto()", err))
 }
 
@@ -103,29 +102,6 @@ func TestSetBCCSPKeystorePath(t *testing.T) {
 
 	viper.Reset()
 	os.Unsetenv("FABRIC_CFG_PATH")
-}
-
-func TestGetEndorserClient(t *testing.T) {
-	tests := []struct {
-		name    string
-		want    pb.EndorserClient
-		wantErr bool
-	}{
-		{
-			name:    "Should not return EndorserClient, there is no peer running",
-			want:    nil,
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := common.GetEndorserClient()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("GetEndorserClient() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-		})
-	}
 }
 
 func TestSetLogLevelFromViper(t *testing.T) {

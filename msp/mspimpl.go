@@ -87,7 +87,7 @@ type bccspmsp struct {
 	ouEnforcement bool
 	// These are the OUIdentifiers of the clients, peers and orderers.
 	// They are used to tell apart these entities
-	clientOU, peerOU, ordererOU *OUIdentifier
+	clientOU, peerOU *OUIdentifier
 }
 
 // newBccspMsp returns an MSP instance backed up by a BCCSP
@@ -306,8 +306,6 @@ func (msp *bccspmsp) hasOURoleInternal(id *identity, mspRole m.MSPRole_MSPRoleTy
 		nodeOUValue = msp.clientOU.OrganizationalUnitIdentifier
 	case m.MSPRole_PEER:
 		nodeOUValue = msp.peerOU.OrganizationalUnitIdentifier
-	case m.MSPRole_ORDERER:
-		nodeOUValue = msp.ordererOU.OrganizationalUnitIdentifier
 	default:
 		return fmt.Errorf("Invalid MSPRoleType. It must be CLIENT, PEER or ORDERER")
 	}
@@ -409,8 +407,6 @@ func (msp *bccspmsp) SatisfiesPrincipal(id Identity, principal *m.MSPPrincipal) 
 		case m.MSPRole_CLIENT:
 			fallthrough
 		case m.MSPRole_PEER:
-			fallthrough
-		case m.MSPRole_ORDERER:
 			mspLogger.Debugf("Checking if identity satisfies role [%s] for %s", m.MSPRole_MSPRoleType_name[int32(mspRole.Role)], msp.name)
 			if err := msp.Validate(id); err != nil {
 				return errors.Wrapf(err, "The identity is not valid under this MSP [%s]", msp.name)
@@ -588,30 +584,21 @@ func (msp *bccspmsp) sanitizeCert(cert *x509.Certificate) (*x509.Certificate, er
 	if isECDSASignedCert(cert) {
 		// Lookup for a parent certificate to perform the sanitization
 		var parentCert *x509.Certificate
-		if cert.IsCA {
-			// at this point, cert might be a root CA certificate
-			// or an intermediate CA certificate
-			chain, err := msp.getUniqueValidationChain(cert, msp.getValidityOptsForCert(cert))
-			if err != nil {
-				return nil, err
-			}
-			if len(chain) == 1 {
-				// cert is a root CA certificate
-				parentCert = cert
-			} else {
-				// cert is an intermediate CA certificate
-				parentCert = chain[1]
-			}
+		chain, err := msp.getUniqueValidationChain(cert, msp.getValidityOptsForCert(cert))
+		if err != nil {
+			return nil, err
+		}
+
+		// at this point, cert might be a root CA certificate
+		// or an intermediate CA certificate
+		if cert.IsCA && len(chain) == 1 {
+			// cert is a root CA certificate
+			parentCert = cert
 		} else {
-			chain, err := msp.getUniqueValidationChain(cert, msp.getValidityOptsForCert(cert))
-			if err != nil {
-				return nil, err
-			}
 			parentCert = chain[1]
 		}
 
 		// Sanitize
-		var err error
 		cert, err = sanitizeECDSASignedCert(cert, parentCert)
 		if err != nil {
 			return nil, err

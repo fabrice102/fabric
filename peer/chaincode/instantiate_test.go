@@ -17,27 +17,16 @@
 package chaincode
 
 import (
-	"errors"
 	"testing"
 
-	"github.com/hyperledger/fabric/peer/common"
-	"github.com/hyperledger/fabric/protos/peer"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestInstantiateCmd(t *testing.T) {
 	InitMSP()
 
-	newMockCF := func() *ChaincodeCmdFactory {
-		mockCF, err := getMockChaincodeCmdFactoryWithEnorserResponses(common.MockResponse{Error: errors.New("chaincode error")}, common.MockResponse{
-			Response: &peer.ProposalResponse{
-				Response:    &peer.Response{Status: 200},
-				Endorsement: &peer.Endorsement{},
-			},
-		})
-		assert.NoError(t, err, "Error getting mock chaincode command factory")
-		return mockCF
-	}
+	mockCF, err := getMockChaincodeCmdFactory()
+	assert.NoError(t, err, "Error getting mock chaincode command factory")
 
 	// basic function tests
 	var tests = []struct {
@@ -82,14 +71,20 @@ func TestInstantiateCmd(t *testing.T) {
 			errorExpected: true,
 			errMsg:        "Expected error executing instantiate command without the -c option",
 		},
+		{
+			name:          "successful with policy",
+			args:          []string{"-P", "OR('MSP.member', 'MSP.WITH.DOTS.member', 'MSP-WITH-DASHES.member')", "-n", "example02", "-v", "anotherversion", "-C", "mychannel", "-c", "{\"Args\": [\"init\",\"a\",\"100\",\"b\",\"200\"]}"},
+			errorExpected: false,
+			errMsg:        "Run chaincode instantiate cmd error",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			resetFlags()
-			cmd := instantiateCmd(newMockCF())
+			cmd := instantiateCmd(mockCF)
 			addFlags(cmd)
 			cmd.SetArgs(test.args)
-			err := cmd.Execute()
+			err = cmd.Execute()
 			checkError(t, err, test.errorExpected, test.errMsg)
 		})
 	}

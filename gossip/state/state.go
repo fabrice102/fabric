@@ -13,6 +13,7 @@ import (
 	"time"
 
 	pb "github.com/golang/protobuf/proto"
+	vsccErrors "github.com/hyperledger/fabric/common/errors"
 	"github.com/hyperledger/fabric/gossip/api"
 	"github.com/hyperledger/fabric/gossip/comm"
 	common2 "github.com/hyperledger/fabric/gossip/common"
@@ -21,7 +22,6 @@ import (
 	"github.com/hyperledger/fabric/protos/common"
 	proto "github.com/hyperledger/fabric/protos/gossip"
 	"github.com/hyperledger/fabric/protos/ledger/rwset"
-	"github.com/op/go-logging"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 )
@@ -148,17 +148,11 @@ type GossipStateProviderImpl struct {
 	stateTransferActive int32
 }
 
-var logger *logging.Logger // package-level logger
-
-func init() {
-	logger = util.GetLogger(util.LoggingStateModule, "")
-}
+var logger = util.GetLogger(util.LoggingStateModule, "")
 
 // NewGossipStateProvider creates state provider with coordinator instance
 // to orchestrate arrival of private rwsets and blocks before committing them into the ledger.
 func NewGossipStateProvider(chainID string, services *ServicesMediator, ledger ledgerResources) GossipStateProvider {
-
-	logger := util.GetLogger(util.LoggingStateModule, "")
 
 	gossipChan, _ := services.Accept(func(message interface{}) bool {
 		// Get only data messages
@@ -557,8 +551,11 @@ func (s *GossipStateProviderImpl) deliverPayloads() {
 						continue
 					}
 				}
-
 				if err := s.commitBlock(rawBlock, p); err != nil {
+					if executionErr, isExecutionErr := err.(*vsccErrors.VSCCExecutionFailureError); isExecutionErr {
+						logger.Errorf("Failed executing VSCC due to %v. Aborting chain processing", executionErr)
+						return
+					}
 					logger.Panicf("Cannot commit block to the ledger due to %+v", errors.WithStack(err))
 				}
 			}
@@ -768,7 +765,8 @@ func (s *GossipStateProviderImpl) addPayload(payload *proto.Payload, blockingMod
 		time.Sleep(enqueueRetryInterval)
 	}
 
-	return s.payloads.Push(payload)
+	s.payloads.Push(payload)
+	return nil
 }
 
 func (s *GossipStateProviderImpl) commitBlock(block *common.Block, pvtData util.PvtDataCollections) error {

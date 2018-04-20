@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -35,6 +36,7 @@ import (
 	"github.com/hyperledger/fabric/protos/utils"
 
 	"github.com/hyperledger/fabric/common/localmsp"
+	"github.com/hyperledger/fabric/common/util"
 	mspmgmt "github.com/hyperledger/fabric/msp/mgmt"
 	"github.com/hyperledger/fabric/orderer/common/performance"
 	"github.com/op/go-logging"
@@ -68,10 +70,15 @@ func Main() {
 		return
 	}
 
-	conf := config.Load()
+	conf, err := config.Load()
+	if err != nil {
+		logger.Error("failed to parse config: ", err)
+		os.Exit(1)
+	}
 	initializeLoggingLevel(conf)
 	initializeLocalMsp(conf)
 
+	prettyPrintStruct(conf)
 	Start(fullCmd, conf)
 }
 
@@ -92,8 +99,10 @@ func Start(cmd string, conf *config.TopLevel) {
 			updateTrustedRoots(grpcServer, caSupport, bundle)
 		}
 	}
+
 	manager := initializeMultichannelRegistrar(conf, signer, tlsCallback)
-	server := NewServer(manager, signer, &conf.Debug)
+	mutualTLS := serverConfig.SecOpts.UseTLS && serverConfig.SecOpts.RequireClientCert
+	server := NewServer(manager, signer, &conf.Debug, conf.General.Authentication.TimeWindow, mutualTLS)
 
 	switch cmd {
 	case start.FullCommand(): // "start" command
@@ -131,7 +140,7 @@ func initializeServerConfig(conf *config.TopLevel) comm.ServerConfig {
 	// secure server config
 	secureOpts := &comm.SecureOptions{
 		UseTLS:            conf.General.TLS.Enabled,
-		RequireClientCert: conf.General.TLS.ClientAuthEnabled,
+		RequireClientCert: conf.General.TLS.ClientAuthRequired,
 	}
 	// check to see if TLS is enabled
 	if secureOpts.UseTLS {
@@ -139,7 +148,7 @@ func initializeServerConfig(conf *config.TopLevel) comm.ServerConfig {
 		// load crypto material from files
 		serverCertificate, err := ioutil.ReadFile(conf.General.TLS.Certificate)
 		if err != nil {
-			logger.Fatalf("Failed to load ServerCertificate file '%s' (%s)",
+			logger.Fatalf("Failed to load server Certificate file '%s' (%s)",
 				conf.General.TLS.Certificate, err)
 		}
 		serverKey, err := ioutil.ReadFile(conf.General.TLS.PrivateKey)
@@ -167,8 +176,8 @@ func initializeServerConfig(conf *config.TopLevel) comm.ServerConfig {
 			}
 			msg = "mutual TLS"
 		}
-		secureOpts.ServerKey = serverKey
-		secureOpts.ServerCertificate = serverCertificate
+		secureOpts.Key = serverKey
+		secureOpts.Certificate = serverCertificate
 		secureOpts.ServerRootCAs = serverRootCAs
 		secureOpts.ClientRootCAs = clientRootCAs
 		logger.Infof("Starting orderer with %s enabled", msg)
@@ -277,6 +286,15 @@ func updateTrustedRoots(srv comm.GRPCServer, rootCASupport *comm.CASupport,
 		}
 	}
 
+	if cc, ok := cm.ConsortiumsConfig(); ok {
+		for _, consortium := range cc.Consortiums() {
+			//loop through consortium orgs and build map of MSPIDs
+			for _, consortiumOrg := range consortium.Organizations() {
+				appOrgMSPs[consortiumOrg.MSPID()] = struct{}{}
+			}
+		}
+	}
+
 	cid := cm.ConfigtxValidator().ChainID()
 	logger.Debugf("updating root CAs for channel [%s]", cid)
 	msps, err := cm.MSPManager().GetMSPs()
@@ -338,4 +356,14 @@ func updateTrustedRoots(srv comm.GRPCServer, rootCASupport *comm.CASupport,
 			logger.Warningf(msg, cm.ConfigtxValidator().ChainID(), err)
 		}
 	}
+}
+
+func prettyPrintStruct(i interface{}) {
+	params := util.Flatten(i)
+	var buffer bytes.Buffer
+	for i := range params {
+		buffer.WriteString("\n\t")
+		buffer.WriteString(params[i])
+	}
+	logger.Infof("Orderer config values:%s\n", buffer.String())
 }

@@ -150,10 +150,11 @@ func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDa
 	}
 	logger.Infof("Received block [%d]", block.Header.Number)
 
-	logger.Debug("Validating block", block.Header.Number)
+	logger.Debugf("Validating block [%d]", block.Header.Number)
 	err := c.Validator.Validate(block)
 	if err != nil {
-		return errors.WithMessage(err, "Validation failed")
+		logger.Errorf("Validation failed: %+v", err)
+		return err
 	}
 
 	blockAndPvtData := &ledger.BlockAndPvtData{
@@ -179,6 +180,7 @@ func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDa
 		logger.Debug("No missing collection private write sets to fetch from remote peers")
 	} else {
 		bFetchFromPeers = true
+		logger.Debug("Could not find all collection private write sets in local peer transient store.")
 		logger.Debug("Fetching", len(privateInfo.missingKeys), "collection private write sets from remote peers for a maximum duration of", retryThresh)
 	}
 	start := time.Now()
@@ -200,7 +202,7 @@ func (c *coordinator) StoreBlock(block *common.Block, privateDataSets util.PvtDa
 	// populate the private RWSets passed to the ledger
 	for seqInBlock, nsRWS := range ownedRWsets.bySeqsInBlock() {
 		rwsets := nsRWS.toRWSet()
-		logger.Debug("Added", len(rwsets.NsPvtRwset), "namespace private write sets to transaction", seqInBlock, "for block", block.Header.Number)
+		logger.Debugf("Added %d namespace private write sets for block [%d], tran [%d]", len(rwsets.NsPvtRwset), block.Header.Number, seqInBlock)
 		blockAndPvtData.BlockPvtData[seqInBlock] = &ledger.TxPvtData{
 			SeqInBlock: seqInBlock,
 			WriteSet:   rwsets,
@@ -663,20 +665,23 @@ type transactionInspector struct {
 
 func (bi *transactionInspector) inspectTransaction(seqInBlock uint64, chdr *common.ChannelHeader, txRWSet *rwsetutil.TxRwSet, endorsers []*peer.Endorsement) {
 	for _, ns := range txRWSet.NsRwSets {
-		for _, hashed := range ns.CollHashedRwSets {
-			policy := bi.accessPolicyForCollection(chdr, ns.NameSpace, hashed.CollectionName)
+		for _, hashedCollection := range ns.CollHashedRwSets {
+			if !containsWrites(chdr.TxId, ns.NameSpace, hashedCollection) {
+				continue
+			}
+			policy := bi.accessPolicyForCollection(chdr, ns.NameSpace, hashedCollection.CollectionName)
 			if policy == nil {
 				continue
 			}
-			if !bi.isEligible(policy, ns.NameSpace, hashed.CollectionName) {
+			if !bi.isEligible(policy, ns.NameSpace, hashedCollection.CollectionName) {
 				continue
 			}
 			key := rwSetKey{
 				txID:       chdr.TxId,
 				seqInBlock: seqInBlock,
-				hash:       hex.EncodeToString(hashed.PvtRwSetHash),
+				hash:       hex.EncodeToString(hashedCollection.PvtRwSetHash),
 				namespace:  ns.NameSpace,
-				collection: hashed.CollectionName,
+				collection: hashedCollection.CollectionName,
 			}
 			bi.privateRWsetsInBlock[key] = struct{}{}
 			if _, exists := bi.ownedRWsets[key]; !exists {
@@ -685,7 +690,7 @@ func (bi *transactionInspector) inspectTransaction(seqInBlock uint64, chdr *comm
 					seqInBlock: seqInBlock,
 				}
 				bi.missingKeys[txAndSeq] = append(bi.missingKeys[txAndSeq], key)
-				bi.sources[key] = endorsersFromOrgs(ns.NameSpace, hashed.CollectionName, endorsers, policy.MemberOrgs())
+				bi.sources[key] = endorsersFromOrgs(ns.NameSpace, hashedCollection.CollectionName, endorsers, policy.MemberOrgs())
 			}
 		} // for all hashed RW sets
 	} // for all RW sets
@@ -811,4 +816,17 @@ func (c *coordinator) GetPvtDataAndBlockByNum(seqNum uint64, peerAuthInfo common
 	}
 
 	return blockAndPvtData.Block, seqs2Namespaces.asPrivateData(), nil
+}
+
+// containsWrites checks whether the given CollHashedRwSet contains writes
+func containsWrites(txID string, namespace string, colHashedRWSet *rwsetutil.CollHashedRwSet) bool {
+	if colHashedRWSet.HashedRwSet == nil {
+		logger.Warningf("HashedRWSet of tx %s, namespace %s, collection %s is nil", txID, namespace, colHashedRWSet.CollectionName)
+		return false
+	}
+	if len(colHashedRWSet.HashedRwSet.HashedWrites) == 0 {
+		logger.Debugf("HashedRWSet of tx %s, namespace %s, collection %s doesn't contain writes", txID, namespace, colHashedRWSet.CollectionName)
+		return false
+	}
+	return true
 }

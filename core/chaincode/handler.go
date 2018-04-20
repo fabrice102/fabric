@@ -18,6 +18,7 @@ import (
 	commonledger "github.com/hyperledger/fabric/common/ledger"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/core/aclmgmt"
+	"github.com/hyperledger/fabric/core/aclmgmt/resources"
 	"github.com/hyperledger/fabric/core/common/ccprovider"
 	"github.com/hyperledger/fabric/core/common/sysccprovider"
 	"github.com/hyperledger/fabric/core/container/ccintf"
@@ -46,10 +47,16 @@ type transactionContext struct {
 	responseNotifier chan *pb.ChaincodeMessage
 
 	// tracks open iterators used for range queries
-	queryIteratorMap map[string]commonledger.ResultsIterator
+	queryIteratorMap    map[string]commonledger.ResultsIterator
+	pendingQueryResults map[string]*pendingQueryResult
 
 	txsimulator          ledger.TxSimulator
 	historyQueryExecutor ledger.HistoryQueryExecutor
+}
+
+type pendingQueryResult struct {
+	batch []*pb.QueryResultBytes
+	count int
 }
 
 type nextStateInfo struct {
@@ -180,7 +187,8 @@ func (handler *Handler) createTxContext(ctxt context.Context, chainID string, tx
 	}
 	txctx := &transactionContext{chainID: chainID, signedProp: signedProp,
 		proposal: prop, responseNotifier: make(chan *pb.ChaincodeMessage, 1),
-		queryIteratorMap: make(map[string]commonledger.ResultsIterator)}
+		queryIteratorMap:    make(map[string]commonledger.ResultsIterator),
+		pendingQueryResults: make(map[string]*pendingQueryResult)}
 	handler.txCtxs[txCtxID] = txctx
 	txctx.txsimulator = getTxSimulator(ctxt)
 	txctx.historyQueryExecutor = getHistoryQueryExecutor(ctxt)
@@ -204,11 +212,12 @@ func (handler *Handler) deleteTxContext(chainID, txid string) {
 	}
 }
 
-func (handler *Handler) putQueryIterator(txContext *transactionContext, queryID string,
+func (handler *Handler) initializeQueryContext(txContext *transactionContext, queryID string,
 	queryIterator commonledger.ResultsIterator) {
 	handler.Lock()
 	defer handler.Unlock()
 	txContext.queryIteratorMap[queryID] = queryIterator
+	txContext.pendingQueryResults[queryID] = &pendingQueryResult{batch: make([]*pb.QueryResultBytes, 0)}
 }
 
 func (handler *Handler) getQueryIterator(txContext *transactionContext, queryID string) commonledger.ResultsIterator {
@@ -217,10 +226,12 @@ func (handler *Handler) getQueryIterator(txContext *transactionContext, queryID 
 	return txContext.queryIteratorMap[queryID]
 }
 
-func (handler *Handler) deleteQueryIterator(txContext *transactionContext, queryID string) {
+func (handler *Handler) cleanupQueryContext(txContext *transactionContext, queryID string) {
 	handler.Lock()
 	defer handler.Unlock()
+	txContext.queryIteratorMap[queryID].Close()
 	delete(txContext.queryIteratorMap, queryID)
+	delete(txContext.pendingQueryResults, queryID)
 }
 
 // Check if the transactor is allow to call this chaincode on this channel
@@ -248,7 +259,7 @@ func (handler *Handler) checkACL(signedProp *pb.SignedProposal, proposal *pb.Pro
 		return errors.Errorf("signed proposal must not be nil from caller [%s]", ccIns.String())
 	}
 
-	return aclmgmt.GetACLProvider().CheckACL(aclmgmt.CC2CC, ccIns.ChainID, signedProp)
+	return aclmgmt.GetACLProvider().CheckACL(resources.CC2CC, ccIns.ChainID, signedProp)
 }
 
 func (handler *Handler) deregister() error {
@@ -709,8 +720,7 @@ func (handler *Handler) handleGetStateByRange(msg *pb.ChaincodeMessage) {
 
 		errHandler := func(err error, iter commonledger.ResultsIterator, errFmt string, errArgs ...interface{}) {
 			if iter != nil {
-				iter.Close()
-				handler.deleteQueryIterator(txContext, iterID)
+				handler.cleanupQueryContext(txContext, iterID)
 			}
 			payload := []byte(err.Error())
 			chaincodeLogger.Errorf(errFmt, errArgs...)
@@ -729,7 +739,8 @@ func (handler *Handler) handleGetStateByRange(msg *pb.ChaincodeMessage) {
 			return
 		}
 
-		handler.putQueryIterator(txContext, iterID, rangeIter)
+		handler.initializeQueryContext(txContext, iterID, rangeIter)
+
 		var payload *pb.QueryResponse
 		payload, err = getQueryResponse(handler, txContext, rangeIter, iterID)
 		if err != nil {
@@ -754,39 +765,52 @@ const maxResultLimit = 100
 //getQueryResponse takes an iterator and fetch state to construct QueryResponse
 func getQueryResponse(handler *Handler, txContext *transactionContext, iter commonledger.ResultsIterator,
 	iterID string) (*pb.QueryResponse, error) {
-
-	var err error
-	var queryResult commonledger.QueryResult
-	var queryResultsBytes []*pb.QueryResultBytes
-
-	for i := 0; i < maxResultLimit; i++ {
-		queryResult, err = iter.Next()
-		if err != nil {
+	pendingQueryResults := txContext.pendingQueryResults[iterID]
+	for {
+		queryResult, err := iter.Next()
+		switch {
+		case err != nil:
 			chaincodeLogger.Errorf("Failed to get query result from iterator")
-			break
-		}
-		if queryResult == nil {
-			break
-		}
-		var resultBytes []byte
-		resultBytes, err = proto.Marshal(queryResult.(proto.Message))
-		if err != nil {
-			chaincodeLogger.Errorf("Failed to get encode query result as bytes")
-			break
-		}
-
-		qresultBytes := pb.QueryResultBytes{ResultBytes: resultBytes}
-		queryResultsBytes = append(queryResultsBytes, &qresultBytes)
-	}
-
-	if queryResult == nil || err != nil {
-		iter.Close()
-		handler.deleteQueryIterator(txContext, iterID)
-		if err != nil {
+			handler.cleanupQueryContext(txContext, iterID)
 			return nil, err
+		case queryResult == nil:
+			// nil response from iterator indicates end of query results
+			batch := pendingQueryResults.cut()
+			handler.cleanupQueryContext(txContext, iterID)
+			return &pb.QueryResponse{Results: batch, HasMore: false, Id: iterID}, nil
+		case pendingQueryResults.count == maxResultLimit:
+			// max number of results queued up, cut batch, then add current result to pending batch
+			batch := pendingQueryResults.cut()
+			if err := pendingQueryResults.add(queryResult); err != nil {
+				handler.cleanupQueryContext(txContext, iterID)
+				return nil, err
+			}
+			return &pb.QueryResponse{Results: batch, HasMore: true, Id: iterID}, nil
+		default:
+			if err := pendingQueryResults.add(queryResult); err != nil {
+				handler.cleanupQueryContext(txContext, iterID)
+				return nil, err
+			}
 		}
 	}
-	return &pb.QueryResponse{Results: queryResultsBytes, HasMore: queryResult != nil, Id: iterID}, nil
+}
+
+func (p *pendingQueryResult) cut() []*pb.QueryResultBytes {
+	batch := p.batch
+	p.batch = nil
+	p.count = 0
+	return batch
+}
+
+func (p *pendingQueryResult) add(queryResult commonledger.QueryResult) error {
+	queryResultBytes, err := proto.Marshal(queryResult.(proto.Message))
+	if err != nil {
+		chaincodeLogger.Errorf("Failed to get encode query result as bytes")
+		return err
+	}
+	p.batch = append(p.batch, &pb.QueryResultBytes{ResultBytes: queryResultBytes})
+	p.count = len(p.batch)
+	return nil
 }
 
 // afterQueryStateNext handles a QUERY_STATE_NEXT request from the chaincode.
@@ -830,8 +854,7 @@ func (handler *Handler) handleQueryStateNext(msg *pb.ChaincodeMessage) {
 
 		errHandler := func(payload []byte, iter commonledger.ResultsIterator, errFmt string, errArgs ...interface{}) {
 			if iter != nil {
-				iter.Close()
-				handler.deleteQueryIterator(txContext, queryStateNext.Id)
+				handler.cleanupQueryContext(txContext, queryStateNext.Id)
 			}
 			chaincodeLogger.Errorf(errFmt, errArgs...)
 			serialSendMsg = &pb.ChaincodeMessage{Type: pb.ChaincodeMessage_ERROR, Payload: payload, Txid: msg.Txid, ChannelId: msg.ChannelId}
@@ -930,8 +953,7 @@ func (handler *Handler) handleQueryStateClose(msg *pb.ChaincodeMessage) {
 
 		iter := handler.getQueryIterator(txContext, queryStateClose.Id)
 		if iter != nil {
-			iter.Close()
-			handler.deleteQueryIterator(txContext, queryStateClose.Id)
+			handler.cleanupQueryContext(txContext, queryStateClose.Id)
 		}
 
 		payload := &pb.QueryResponse{HasMore: false, Id: queryStateClose.Id}
@@ -988,8 +1010,7 @@ func (handler *Handler) handleGetQueryResult(msg *pb.ChaincodeMessage) {
 
 		errHandler := func(payload []byte, iter commonledger.ResultsIterator, errFmt string, errArgs ...interface{}) {
 			if iter != nil {
-				iter.Close()
-				handler.deleteQueryIterator(txContext, iterID)
+				handler.cleanupQueryContext(txContext, iterID)
 			}
 			chaincodeLogger.Errorf(errFmt, errArgs...)
 			serialSendMsg = &pb.ChaincodeMessage{Type: pb.ChaincodeMessage_ERROR, Payload: payload, Txid: msg.Txid, ChannelId: msg.ChannelId}
@@ -1024,7 +1045,8 @@ func (handler *Handler) handleGetQueryResult(msg *pb.ChaincodeMessage) {
 			return
 		}
 
-		handler.putQueryIterator(txContext, iterID, executeIter)
+		handler.initializeQueryContext(txContext, iterID, executeIter)
+
 		var payload *pb.QueryResponse
 		payload, err = getQueryResponse(handler, txContext, executeIter, iterID)
 		if err != nil {
@@ -1086,8 +1108,7 @@ func (handler *Handler) handleGetHistoryForKey(msg *pb.ChaincodeMessage) {
 
 		errHandler := func(payload []byte, iter commonledger.ResultsIterator, errFmt string, errArgs ...interface{}) {
 			if iter != nil {
-				iter.Close()
-				handler.deleteQueryIterator(txContext, iterID)
+				handler.cleanupQueryContext(txContext, iterID)
 			}
 			chaincodeLogger.Errorf(errFmt, errArgs...)
 			serialSendMsg = &pb.ChaincodeMessage{Type: pb.ChaincodeMessage_ERROR, Payload: payload, Txid: msg.Txid, ChannelId: msg.ChannelId}
@@ -1114,7 +1135,7 @@ func (handler *Handler) handleGetHistoryForKey(msg *pb.ChaincodeMessage) {
 			return
 		}
 
-		handler.putQueryIterator(txContext, iterID, historyIter)
+		handler.initializeQueryContext(txContext, iterID, historyIter)
 
 		var payload *pb.QueryResponse
 		payload, err = getQueryResponse(handler, txContext, historyIter, iterID)
@@ -1326,21 +1347,10 @@ func (handler *Handler) enterBusyState(e *fsm.Event, state string) {
 
 				version = cd.CCVersion()
 
-				ac, err := getApplicationConfigForChain(calledCcIns.ChainID)
+				err = ccprovider.CheckInstantiationPolicy(calledCcIns.ChaincodeName, version, cd.(*ccprovider.ChaincodeData))
 				if err != nil {
-					errHandler([]byte(err.Error()), "[%s]Failed to get application config (%s) for invoked chaincode. Sending %s", shorttxid(msg.Txid), err, pb.ChaincodeMessage_ERROR)
+					errHandler([]byte(err.Error()), "[%s]CheckInstantiationPolicy, error %s. Sending %s", shorttxid(msg.Txid), err, pb.ChaincodeMessage_ERROR)
 					return
-				}
-
-				if !ac.Capabilities().LifecycleViaConfig() {
-					err = ccprovider.CheckInsantiationPolicy(calledCcIns.ChaincodeName, version, cd.(*ccprovider.ChaincodeData))
-					if err != nil {
-						errHandler([]byte(err.Error()), "[%s]CheckInsantiationPolicy, error %s. Sending %s", shorttxid(msg.Txid), err, pb.ChaincodeMessage_ERROR)
-						return
-					}
-				} else {
-					// FIXME: consider checking the instantiation policy
-					//        a better place to do it would be the chaincodeSupport.Launch function
 				}
 			} else {
 				//this is a system cc, just call it directly

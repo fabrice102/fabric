@@ -9,6 +9,7 @@ package encoder
 import (
 	"testing"
 
+	"github.com/hyperledger/fabric/common/capabilities"
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/configtx"
 	"github.com/hyperledger/fabric/common/flogging"
@@ -101,6 +102,7 @@ func TestChannelCreateWithResources(t *testing.T) {
 
 	t.Run("AtV1.1", func(t *testing.T) {
 		createConfig := genesisconfig.Load(genesisconfig.SampleSingleMSPChannelV11Profile)
+		createConfig.Application.Capabilities[capabilities.ApplicationResourcesTreeExperimental] = true
 
 		configUpdate, err := NewChannelCreateConfigUpdate("channel.id", nil, createConfig)
 		assert.NoError(t, err)
@@ -223,7 +225,7 @@ func TestNewChannelGroup(t *testing.T) {
 
 	t.Run("Add application unknown MSP", func(t *testing.T) {
 		config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
-		config.Application = &genesisconfig.Application{Organizations: []*genesisconfig.Organization{&genesisconfig.Organization{Name: "FakeOrg"}}}
+		config.Application = &genesisconfig.Application{Organizations: []*genesisconfig.Organization{{Name: "FakeOrg"}}}
 		group, err := NewChannelGroup(config)
 		assert.Error(t, err)
 		assert.Nil(t, group)
@@ -231,7 +233,7 @@ func TestNewChannelGroup(t *testing.T) {
 
 	t.Run("Add consortiums unknown MSP", func(t *testing.T) {
 		config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
-		config.Consortiums["fakeorg"] = &genesisconfig.Consortium{Organizations: []*genesisconfig.Organization{&genesisconfig.Organization{Name: "FakeOrg"}}}
+		config.Consortiums["fakeorg"] = &genesisconfig.Consortium{Organizations: []*genesisconfig.Organization{{Name: "FakeOrg"}}}
 		group, err := NewChannelGroup(config)
 		assert.Error(t, err)
 		assert.Nil(t, group)
@@ -239,7 +241,7 @@ func TestNewChannelGroup(t *testing.T) {
 
 	t.Run("Add orderer unknown MSP", func(t *testing.T) {
 		config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
-		config.Orderer = &genesisconfig.Orderer{Organizations: []*genesisconfig.Organization{&genesisconfig.Organization{Name: "FakeOrg"}}}
+		config.Orderer = &genesisconfig.Orderer{Organizations: []*genesisconfig.Organization{{Name: "FakeOrg"}}}
 		group, err := NewChannelGroup(config)
 		assert.Error(t, err)
 		assert.Nil(t, group)
