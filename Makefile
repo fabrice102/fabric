@@ -102,7 +102,7 @@ PROJECT_FILES = $(shell git ls-files  | grep -v ^test | grep -v ^unit-test | \
 	grep -v ^.git | grep -v ^examples | grep -v ^devenv | grep -v .png$ | \
 	grep -v ^LICENSE )
 RELEASE_TEMPLATES = $(shell git ls-files | grep "release/templates")
-IMAGES = peer orderer ccenv javaenv buildenv testenv tools
+IMAGES = peer orderer ccenv buildenv testenv tools #javaenv 
 RELEASE_PLATFORMS = windows-amd64 darwin-amd64 linux-amd64 linux-ppc64le linux-s390x
 RELEASE_PKGS = configtxgen cryptogen configtxlator peer orderer
 
@@ -252,8 +252,8 @@ build/docker/gotools: gotools/Makefile
 		make install BINDIR=/opt/gotools/bin OBJDIR=/opt/gotools/obj
 
 # Both peer and peer-docker depend on ccenv and javaenv (all docker env images it supports).
-build/bin/peer: build/image/ccenv/$(DUMMY) build/image/javaenv/$(DUMMY)
-build/image/peer/$(DUMMY): build/image/ccenv/$(DUMMY) build/image/javaenv/$(DUMMY)
+build/bin/peer: build/image/ccenv/$(DUMMY) #build/image/javaenv/$(DUMMY)
+build/image/peer/$(DUMMY): build/image/ccenv/$(DUMMY) #build/image/javaenv/$(DUMMY)
 
 build/bin/%: $(PROJECT_FILES)
 	@mkdir -p $(@D)
