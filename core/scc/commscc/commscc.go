@@ -95,11 +95,15 @@ func (scc *CommSCC) handleMessage(msg gossip.ReceivedMessage) {
 func (scc *CommSCC) relayMessageToReceivers(msg gossip.ReceivedMessage, session string) {
 	// Probe to see if some receive operation is interested in this session
 	err := scc.pubSub.Publish(session, msg)
-	if err == nil {
-		logger.Info(">>> publish succeeded")
-		return
-	}
-	logger.Info(">>>> publish failed")
+	// if err == nil {
+	// 	logger.Info(">>> publish succeeded")
+	// 	return
+	// }
+	// logger.Info(">>>> publish failed")
+
+	// FIXME FIXME DIRTY FIXME - we publish in msgStore whatever happens, otherwise
+	// we might lose messages
+	_ = err
 
 	// If the publish failed we need to save the message
 	scc.msgStore.Put(session, msg)
