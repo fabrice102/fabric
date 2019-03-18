@@ -29,8 +29,9 @@ import (
 var logger = flogging.MustGetLogger("commscc")
 
 const (
-	SEND    = "send"
-	RECEIVE = "receive"
+	SEND      = "send"
+	RECEIVE   = "receive"
+	BENCHMARK = "benchmark"
 
 	// maxMessageSaveTime denotes the maximum period of time to save a message
 	// in memory until it is purged
@@ -54,8 +55,9 @@ func NewCommSCC() *CommSCC {
 		msgStore: NewMessageStore(),
 	}
 	c.actions = map[string]action{
-		SEND:    c.send,
-		RECEIVE: c.receive,
+		SEND:      c.send,
+		RECEIVE:   c.receive,
+		BENCHMARK: c.benchmark,
 	}
 	go c.listen()
 	return c
@@ -136,16 +138,7 @@ func (scc *CommSCC) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 	return shim.Error(fmt.Sprintf("function [%s] does not exist", function))
 }
 
-func (scc *CommSCC) send(stub shim.ChaincodeStubInterface) pb.Response {
-	// Send a payload args[1] with sessionID args[2] to a given endpoint args[3]
-	args := stub.GetArgs()
-	// Payload
-	payload := args[1]
-	// SessionID
-	sessionID := args[2]
-	// Unmarshal the endpoint
-	endpoint := string(args[3])
-
+func (scc *CommSCC) sendImpl(payload []byte, sessionID []byte, endpoint string) pb.Response {
 	logger.Infof("[%v] Send [%v] to [%v]", string(sessionID), string(payload), endpoint)
 
 	msg := &gossip.GossipMessage{
@@ -177,6 +170,51 @@ func (scc *CommSCC) send(stub shim.ChaincodeStubInterface) pb.Response {
 	return shim.Success(nil)
 }
 
+func (scc *CommSCC) send(stub shim.ChaincodeStubInterface) pb.Response {
+	// Send a payload args[1] with sessionID args[2] to a given endpoint args[3]
+	args := stub.GetArgs()
+	// Payload
+	payload := args[1]
+	// SessionID
+	sessionID := args[2]
+	// Unmarshal the endpoint
+	endpoint := string(args[3])
+
+	return scc.sendImpl(payload, sessionID, endpoint)
+}
+
+func (scc *CommSCC) receiveImpl(topic string, endpoint string, timeout time.Duration) ([]byte, string) {
+
+	sub := scc.pubSub.Subscribe(topic, timeout)
+
+	// First, check if we have messages waiting for us.
+	// This may happen if we invoked Subscribe() too late
+	waitingMessages := scc.msgStore.Search(topic, messageFrom(endpoint))
+	logger.Info(">>>> collected", len(waitingMessages), "messages waiting for this session")
+	scc.msgStore.Remove(topic)
+	if len(waitingMessages) > 0 {
+		res := waitingMessages[0].GetGossipMessage().GetMpcData().Payload.Data
+		logger.Info(">>>>> Returning", string(res))
+		//return shim.Success(res)
+		return res, ""
+	}
+
+	var totalMessages []gossip.ReceivedMessage
+	// Next, wait for messages that we may have received after subscribing.
+	totalMessages = append(totalMessages, drainSubscription(sub)...)
+	logger.Info("Received", len(totalMessages), "via subscription")
+	if len(totalMessages) == 0 {
+		logger.Warningf("Didn't receive any message from %s - received %d messages", endpoint, len(totalMessages))
+		return nil, fmt.Sprintf("Didn't receive any message from %s", endpoint)
+	}
+	// Grab the first message from endpoint
+	msg := totalMessages[0]
+	// Given init, we expect to see a ReceivedMessage here.
+	mpcData := msg.GetGossipMessage().GetMpcData()
+	logger.Infof("Received on [%v], [%v]", topic, mpcData.Payload.Data)
+	return mpcData.Payload.Data, ""
+}
+
 func (scc *CommSCC) receive(stub shim.ChaincodeStubInterface) pb.Response {
 	rStub := ReceivedStub{stub}
 	if err := rStub.Validate(); err != nil {
@@ -195,34 +233,67 @@ func (scc *CommSCC) receive(stub shim.ChaincodeStubInterface) pb.Response {
 		return shim.Error(errMsg)
 	}
 
-	sub := scc.pubSub.Subscribe(topic, timeout)
-
-	// First, check if we have messages waiting for us.
-	// This may happen if we invoked Subscribe() too late
-	waitingMessages := scc.msgStore.Search(topic, messageFrom(endpoint))
-	logger.Info(">>>> collected", len(waitingMessages), "messages waiting for this session")
-	scc.msgStore.Remove(topic)
-	if len(waitingMessages) > 0 {
-		res := waitingMessages[0].GetGossipMessage().GetMpcData().Payload.Data
-		logger.Info(">>>>> Returning", string(res))
-		return shim.Success(res)
-	}
-
-	var totalMessages []gossip.ReceivedMessage
-	// Next, wait for messages that we may have received after subscribing.
-	totalMessages = append(totalMessages, drainSubscription(sub)...)
-	logger.Info("Received", len(totalMessages), "via subscription")
-	if len(totalMessages) == 0 {
-		logger.Warningf("Didn't receive any message from %s - received %d messages", endpoint, len(totalMessages))
-		return shim.Error(fmt.Sprintf("Didn't receive any message from %s", endpoint))
-	}
-	// Grab the first message from endpoint
-	msg := totalMessages[0]
-	// Given init, we expect to see a ReceivedMessage here.
-	mpcData := msg.GetGossipMessage().GetMpcData()
-	logger.Infof("Received on [%v], [%v]", topic, mpcData.Payload.Data)
+	data, error := scc.receiveImpl(topic, endpoint, timeout)
 	// TODO: check that payload is different from nil
-	return shim.Success(mpcData.Payload.Data)
+	if data == nil {
+		return shim.Error(error)
+	}
+
+	return shim.Success(data)
+
+}
+
+func (scc *CommSCC) benchmark(stub shim.ChaincodeStubInterface) pb.Response {
+	args := stub.GetArgs()
+	// payload
+	payload := args[1]
+	// essionID
+	sessionID := args[2]
+	// sender peerID
+	senderPeerID := string(args[3])
+	// receiver peerID
+	receiverPeerID := string(args[4])
+	// my peerID
+	myPeerID := string(args[5])
+	// Iteration
+	iteration, _ := strconv.Atoi(string(args[6]))
+
+	timeout, _ := time.ParseDuration("10ms")
+
+	logger.Infof("~~~~~~~~~~~~~~~~~~senderPeerID is %v", senderPeerID)
+	logger.Infof("~~~~~~~~~~~~~~~~~~receiverPeerID is %v", receiverPeerID)
+	logger.Infof("~~~~~~~~~~~~~~~~~~sessionID is %v", sessionID)
+
+	var totalTime int64
+	totalTime = 0 //ms
+
+	for i := 0; i < iteration; i++ {
+		sessionIDStr := string(sessionID) + strconv.Itoa(i)
+
+		if strings.Compare(myPeerID, senderPeerID) == 0 {
+			// I am the sender
+			start := time.Now()
+			scc.sendImpl(payload, []byte(sessionIDStr), receiverPeerID)
+
+			recvData, _ := scc.receiveImpl(sessionIDStr, receiverPeerID, timeout)
+			for recvData == nil {
+				recvData, _ = scc.receiveImpl(sessionIDStr, receiverPeerID, timeout)
+			}
+			elapsed := time.Since(start)
+			totalTime = totalTime + (elapsed.Nanoseconds() / int64(1000000))
+		} else {
+			// I am the receiver
+			recvData, _ := scc.receiveImpl(sessionIDStr, senderPeerID, timeout)
+			for recvData == nil {
+				logger.Infof("%v is waiting to receive the data", receiverPeerID)
+				recvData, _ = scc.receiveImpl(sessionIDStr, senderPeerID, timeout)
+			}
+			scc.sendImpl(payload, []byte(sessionIDStr), senderPeerID)
+		}
+	}
+
+	fmt.Printf("~~~~~~~~~~~~~~~ Gossip benchmark: round trip elapsed time is %v ms\n", totalTime)
+	return shim.Success(nil)
 }
 
 func drainSubscription(sub util.Subscription) []gossip.ReceivedMessage {

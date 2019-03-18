@@ -509,11 +509,11 @@ chaincode:
     # whitelist, add "myscc: enable" to the list below, and register in
     # chaincode/importsysccs.go
     system:
-        cscc: enable
-        lscc: enable
-        escc: enable
-        vscc: enable
-        qscc: enable
+      cscc: enable
+      lscc: enable
+      escc: enable
+      vscc: enable
+      qscc: enable
 
     # System chaincode plugins: in addition to being imported and compiled
     # into fabric through core/chaincode/importsysccs.go, system chaincodes
